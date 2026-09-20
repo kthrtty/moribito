@@ -111,3 +111,24 @@ test('正規ドメインから転送された先のフィッシングもブロ�
   await page.waitForURL(WARNING_URL_RE, { timeout: 15_000 });
   await expect(page.locator('#host')).toHaveText('amazon.co.jp.account-verify.x7fk2p.top');
 });
+
+test('公式ドメインでも、第三者が作れる領域のフィッシングは止める', async ({ context, serviceWorker }) => {
+  // docs.google.com は登録ドメインが google.com なので、以前は
+  // 「公式だから安全」と打ち切られ、中身を一切見ていなかった。
+  const page = await context.newPage();
+  await goto(page, 'https://docs.google.com/forms/d/e/1FAIpQLSc/viewform');
+  await page.waitForURL(WARNING_URL_RE, { timeout: 15_000 });
+
+  const titles = await page.locator('#signals .signal .title').allTextContents();
+  expect(titles.join('\n')).toContain('amazon を名乗っています');
+});
+
+test('同じ公式ドメインでも、通常の領域は従来どおり通す', async ({ context, serviceWorker }) => {
+  const page = await context.newPage();
+  await goto(page, 'https://docs.google.com/document/d/abc/edit');
+  await page.waitForSelector('#stub-page');
+  await page.waitForTimeout(1200);
+
+  await expect(page).toHaveURL('https://docs.google.com/document/d/abc/edit');
+  await expect(page.locator('#moribito-overlay')).toHaveCount(0);
+});

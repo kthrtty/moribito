@@ -159,3 +159,66 @@ test('analyze: 不可視文字・BiDiを見逃さない', () => {
   const bidi = analyzeUrl('https://example.com/‮gnp.exe');
   assert.ok(bidi.signals.some((s) => s.id === 'bidi-control'));
 });
+
+// --- 公式ドメイン内の「誰でも中身を作れる領域」 ---------------------------
+test('公式ドメインでも、第三者が中身を作れる領域は判定を打ち切らない', () => {
+  // Googleフォームはフィッシングの定番の器。ドメインが正規でも特別扱いしない
+  assert.equal(analyzeUrl('https://docs.google.com/forms/d/e/abc/viewform').reason, undefined);
+  assert.equal(analyzeUrl('https://sites.google.com/view/login-update').reason, undefined);
+  assert.equal(analyzeUrl('https://drive.google.com/file/d/abc/view').reason, undefined);
+  assert.equal(analyzeUrl('https://tenant.sharepoint.com/sites/x').reason, undefined);
+  assert.equal(analyzeUrl('https://forms.office.com/r/abc').reason, undefined);
+
+  // 通常の領域は従来どおり公式として打ち切る
+  assert.equal(analyzeUrl('https://www.google.com/search?q=a').reason, 'official:google');
+  assert.equal(analyzeUrl('https://docs.google.com/document/d/abc/edit').reason, 'official:google');
+  assert.equal(analyzeUrl('https://mail.google.com/mail/u/0').reason, 'official:google');
+});
+
+test('打ち切らないだけで、それ自体を危険とはみなさない', () => {
+  // 特別扱いをやめるのが目的。ルールが何も見つけなければ通過する
+  const r = analyzeUrl('https://docs.google.com/forms/d/e/abc/viewform');
+  assert.equal(r.verdict, 'allow');
+  assert.deepEqual(r.signals, []);
+});
+
+// --- 無料ホスティング -------------------------------------------------------
+test('無料ホスティングは、それだけでは警告にしない', () => {
+  // 正規の個人サイトや開発用サイトが多いため
+  for (const url of [
+    'https://my-project.pages.dev/', 'https://johndoe.github.io/blog',
+    'https://acme-docs.netlify.app/', 'https://documentation.pages.dev/',
+    'https://my-startup.vercel.app/',
+  ]) {
+    const r = analyzeUrl(url);
+    assert.equal(r.verdict, 'allow', `${url} が ${r.verdict} になっている`);
+    assert.ok(r.signals.some((s) => s.id === 'free-hosting'));
+  }
+});
+
+test('無料ホスティング + 自動生成らしい名前は警告する', () => {
+  for (const url of [
+    'https://undergrdf.firebaseapp.com/',        // 子音が5つ以上連続
+    'https://xw7-mks7h.firebaseapp.com/',        // 数字の比率が高い
+    'https://domappcheckomeg7.firebaseapp.com/', // 16文字以上
+    'https://porezna-uprava-5e120.firebaseapp.com/',
+  ]) {
+    const r = analyzeUrl(url);
+    assert.equal(r.verdict, 'warn', `${url} が ${r.verdict} になっている`);
+    assert.ok(r.signals.some((s) => s.id === 'free-hosting-random'));
+  }
+});
+
+test('末尾の年号は自動生成とみなさない', () => {
+  // project2024 のような名前は人が付けるもの
+  assert.equal(analyzeUrl('https://project2024.pages.dev/').verdict, 'allow');
+  assert.equal(analyzeUrl('https://conference2019.netlify.app/').verdict, 'allow');
+});
+
+test('無料ホスティング + ブランド名は従来どおり強い', () => {
+  const r = analyzeUrl('http://www.office365-cloud.workers.dev');
+  assert.equal(r.verdict, 'block');
+  assert.ok(r.signals.some((s) => s.id === 'free-hosting-brand'));
+  // ブランド名がある場合は弱い方の信号は出さない（二重計上しない）
+  assert.ok(!r.signals.some((s) => s.id === 'free-hosting'));
+});

@@ -5,7 +5,7 @@
 import { extractFeatures } from './features.js';
 import { evaluateRules } from './rules.js';
 import { combine, verdictOf, isGrey, blendWithModel, DEFAULT_THRESHOLDS } from './score.js';
-import { BRANDS, POPULAR_DOMAINS, brandOwning } from './brands.js';
+import { BRANDS, POPULAR_DOMAINS, brandOwning, isUserGeneratedArea } from './brands.js';
 import { evaluatePageEvidence } from './page-evidence.js';
 
 export { DEFAULT_THRESHOLDS };
@@ -51,7 +51,9 @@ export function analyzeUrl(rawUrl, options = {}) {
   //    正規ドメインが乗っ取られてフィッシングページを置かれる事例があるため。
   const hit = options.blocklistHit ?? null;
   const reportedPrecisely = hit && (hit.kind === 'url' || hit.kind === 'host');
-  if (!reportedPrecisely) {
+  // 公式ドメインでも、第三者が中身を作れる領域は打ち切らない
+  const userGenerated = isUserGeneratedArea(f.host, f.path);
+  if (!reportedPrecisely && !userGenerated) {
     const owner = brandOwning(f.registrable);
     if (owner) {
       return { ...base, ok: true, score: 0, verdict: 'allow', grey: false, signals: [], reason: `official:${owner.id}` };

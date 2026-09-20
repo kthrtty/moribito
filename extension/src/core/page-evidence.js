@@ -9,7 +9,7 @@
  *   1段目 可視の入力欄があるフォームを広く拾う（passwordに限定しない）
  *   2段目 フィールド単位で「何を要求しているか」を採点し、検索欄は減点する
  */
-import { BRANDS, brandOwning } from './brands.js';
+import { BRANDS, brandOwning, isUserGeneratedArea } from './brands.js';
 import { matchBrandToken } from './rules.js';
 import { skeleton } from './confusables.js';
 import { tokenize } from './text.js';
@@ -161,7 +161,10 @@ export function evaluatePageEvidence(f, evidence, opt = {}) {
   // 正規サイトのログインページを疑うことになるため。
   // ただし「広告経由で差し込まれた詐欺」は正規ドメイン上でも起きるので、
   // 構造的な証拠（電話誘導・離脱妨害）だけは見る。
-  const structureOnly = opt.mode === 'structure-only' || Boolean(brandOwning(f.registrable));
+  // 公式ドメインでも、第三者が中身を作れる領域（Googleフォーム等）は
+  // 通常どおり中身を見る。ここを公式扱いにすると、定番の器が素通りになる。
+  const trustedDomain = Boolean(brandOwning(f.registrable)) && !isUserGeneratedArea(f.host, f.path);
+  const structureOnly = opt.mode === 'structure-only' || trustedDomain;
 
   const demand = structureOnly ? { value: 0, kinds: [], otpGroup: false, seed: false } : credentialDemand(evidence);
   const claim = structureOnly ? null : brandClaim(evidence.identity, brands);

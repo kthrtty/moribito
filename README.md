@@ -160,6 +160,7 @@ tests/              unit (Node) + e2e (Playwright, headless Chromium)
 | A public suffix faked inside the subdomain | `co.jp` appearing on the subdomain side |
 | Long random subdomains, machine-generated domain names | entropy + consonant runs |
 | Free hosting plus a brand name | `rakuten-card-login.pages.dev` |
+| Free hosting with a machine-generated name | `xw7-mks7h.firebaseapp.com` (a plain `my-project.pages.dev` is not flagged) |
 | `@` host spoofing, raw IPs, odd ports, heavily abused TLDs | `http://apple.com@203.0.113.9/` |
 
 ### Page content (two stages)
@@ -186,9 +187,18 @@ paraphrase, missed English and Chinese entirely, and fired on a real bank's genu
 String matching does not do NL classification; tech-support scams are now detected structurally instead.
 See [docs/security-review.md](docs/security-review.md) finding 10.
 
+### User-generated areas on official domains
+
+`docs.google.com/forms/`, `sites.google.com`, `*.sharepoint.com` and similar are **not**
+short-circuited as official, even though the registrable domain belongs to a real brand.
+Anyone can publish there, and form builders are a standard phishing vector. Being listed
+here does not make a page suspicious — it only removes the automatic trust, so the URL rules
+and the content inspection run as they would anywhere else.
+
 ### Keeping false positives down
 
 - Official brand domains (46 brands) and popular domains are never judged
+  (except the user-generated areas above)
 - Private IPs, `localhost` and `*.local` are out of scope (router admin pages)
 - Real brands one edit apart (`paypal` / `paypay`) are not treated as typos of each other
 - Common English words (`finance`, `service`, `monthly`) are excluded from typo candidates
@@ -734,6 +744,7 @@ Certificate Transparency ログから「ブランド語を含む新規証明書�
 | public suffix を装うサブドメイン | サブドメイン側に `co.jp` が現れる |
 | ランダム長サブドメイン / 機械生成ドメイン名 | エントロピーと子音連続で判定 |
 | 無料ホスティング＋ブランド名 | `rakuten-card-login.pages.dev` |
+| 無料ホスティング＋自動生成らしい名前 | `xw7-mks7h.firebaseapp.com`（`my-project.pages.dev` は対象外） |
 | `@` によるホスト偽装、IP直打ち、非標準ポート、濫用の多いTLD | `http://apple.com@203.0.113.9/` |
 
 ### 層4: 表示コンテンツ（2段構え）
@@ -760,9 +771,19 @@ Certificate Transparency ログから「ブランド語を含む新規証明書�
 サポート詐欺の検出は構造ベースに組み替えました。
 経緯は [docs/security-review.md](docs/security-review.md) の指摘10を参照してください。
 
+### 公式ドメイン内の「誰でも中身を作れる領域」
+
+`docs.google.com/forms/`、`sites.google.com`、`*.sharepoint.com` などは、
+登録ドメインが正規ブランドのものであっても**公式扱いで打ち切りません**。
+誰でも中身を公開でき、特にフォーム作成サービスはフィッシングの定番の器だからです。
+
+ここに載っていること自体は「危険」を意味しません。**自動的な信頼をやめるだけ**で、
+判定は他のページと同じようにURLルールと表示内容の検査が行われます。
+
 ### 誤検知を抑える仕組み
 
 - 公式ブランドドメイン（46ブランド）と著名ドメインは判定せず通過
+  （上記の「誰でも中身を作れる領域」を除く）
 - プライベートIP・`localhost`・`*.local` は対象外（ルーター管理画面など）
 - 実在ブランド同士が1文字違いの場合（`paypal` / `paypay`）はタイポ扱いにしない
 - ありふれた一般語（`finance` / `service` / `monthly` など）はタイポ候補から除外

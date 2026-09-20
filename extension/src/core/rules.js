@@ -208,10 +208,25 @@ export function evaluateRules(f, opt = {}) {
     }
 
     if (FREE_HOSTING.has(f.suffix) || FREE_HOSTING.has(f.registrable)) {
+      const platform = f.suffix || f.registrable;
       const anyBrand = subHit ?? nameHit ?? findBrandInTokens(f.pathTokens, brands);
       if (anyBrand) {
         add('free-hosting-brand', 0.75, '無料ホスティング上のブランド名ページ',
-          `${f.suffix || f.registrable} は誰でも開設できるホスティングです。`);
+          `${platform} は誰でも開設できるホスティングです。`);
+      } else {
+        // ブランド名が無くても、使い捨てらしい名前なら弱い信号を出す。
+        // 無料ホスティングは正規の個人サイトも多いので、名前の作りで差を付ける。
+        add('free-hosting', 0.15, '誰でも開設できるホスティング上のページ',
+          `${platform} は無料で取得できるため、使い捨てのフィッシングに使われます。`);
+
+        // 末尾の年号（project2024 など）は人が付ける名前なので数字とみなさない
+        const withoutYear = f.name.replace(/(?:19|20)\d{2}$/, '');
+        const digitRatio = (withoutYear.match(/\d/g) ?? []).length / Math.max(1, withoutYear.length);
+        const throwaway = f.maxConsonantRun >= 5 || digitRatio >= 0.2 || f.name.length >= 16;
+        if (throwaway) {
+          add('free-hosting-random', 0.5, '無料ホスティング上の自動生成らしい名前',
+            `${f.registrable} は、人が付けた名前とは考えにくい作りです。`);
+        }
       }
     }
 

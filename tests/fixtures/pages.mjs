@@ -44,6 +44,9 @@ const SCAM_OVERLAY = `
   <script>window.onbeforeunload = () => 'stay';<\/script>`;
 
 const ROUTES = [
+  // 公式ドメイン上の、第三者が作れる領域に置かれたフィッシング
+  { match: /docs\.google\.com\/forms\//, html: () => page('Amazon アカウント確認', LOGIN_FORM) },
+  { match: /docs\.google\.com\/document\//, html: () => page('議事録 - Google ドキュメント', '<h1 id="stub-page">議事録</h1>') },
   { match: /nikkei\.com\/article\/scam/, html: () => page('日本経済新聞', SCAM_OVERLAY) },
   { match: /nikkei\.com\/article\/normal/, html: () => page('日本経済新聞', '<h1 id="stub-page">通常の記事</h1><p>本文です。</p>') },
   { match: /mufg-bk-support\.cyou/, html: () => page('MUFG Bank｜ログイン',

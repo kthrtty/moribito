@@ -150,6 +150,37 @@ export const POPULAR_DOMAINS = new Set([
   'mozilla.org', 'developer.mozilla.org', 'chatgpt.com', 'slack.com', 'notion.so',
   'atlassian.com', 'zoom.us', 'dropbox.com', 'box.com', 'salesforce.com',
 ]);
+/**
+ * 公式ドメインの中にある「誰でも中身を作れる領域」。
+ *
+ * docs.google.com/forms のようなフォーム作成サービスは、ドメインこそ正規だが
+ * 中身は第三者が作る。ここを「公式だから安全」と短絡すると、
+ * フィッシングの定番の器がそのまま素通りになる。
+ * 判定を打ち切らず、通常のルールと表示内容の検査を通す
+ * （＝それ自体を危険とみなすのではなく、特別扱いをやめるだけ）。
+ */
+export const USER_GENERATED_AREAS = [
+  { host: 'sites.google.com' },
+  { host: 'docs.google.com', pathPrefix: '/forms/' },
+  { host: 'drive.google.com', pathPrefix: '/file/' },
+  { host: 'forms.office.com' },
+  { host: 'forms.microsoft.com' },
+  { host: 'onedrive.live.com' },
+  { hostSuffix: '.sharepoint.com' },
+  { host: 'firebasestorage.googleapis.com' },
+];
+
+export function isUserGeneratedArea(host, path = '') {
+  const h = String(host ?? '').toLowerCase();
+  const p = String(path ?? '');
+  return USER_GENERATED_AREAS.some((area) => {
+    if (area.host && area.host !== h) return false;
+    if (area.hostSuffix && !h.endsWith(area.hostSuffix)) return false;
+    if (area.pathPrefix && !p.startsWith(area.pathPrefix)) return false;
+    return true;
+  });
+}
+
 /** 登録ドメインが正規ブランドのものならそのブランドを返す。 */
 export function brandOwning(registrable) {
   if (!registrable) return null;

@@ -5,7 +5,7 @@
  * 設定画面は cost / description をそのまま表示する。
  * 各検出器は chrome.* を知らず、外部とのやり取りは ctx.services 経由で受け取る。
  */
-import { BRANDS, POPULAR_DOMAINS, brandOwning } from '../brands.js';
+import { BRANDS, POPULAR_DOMAINS, brandOwning, isUserGeneratedArea } from '../brands.js';
 import { evaluateRules, knownPhishingSignal } from '../rules.js';
 import { evaluatePageEvidence } from '../page-evidence.js';
 import { queryProviders, reputationSignals } from '../reputation.js';
@@ -62,6 +62,8 @@ export const knownGoodDetector = {
     const f = ctx.features;
     if (!f?.ok) return null;
     if (f.isPrivateNetwork) return { decision: { verdict: 'allow', reason: 'private-network' } };
+    // 公式ドメインでも、第三者が中身を作れる領域は打ち切らない
+    if (isUserGeneratedArea(f.host, f.path)) return null;
     const owner = brandOwning(f.registrable);
     if (owner) return { decision: { verdict: 'allow', reason: `official:${owner.id}` } };
     if (POPULAR_DOMAINS.has(f.registrable)) {
