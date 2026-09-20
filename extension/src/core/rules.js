@@ -9,6 +9,7 @@ import {
 import { collapse } from './confusables.js';
 import { levenshtein } from './text.js';
 import { splitHost } from './psl.js';
+import { randomnessScore } from './naming.js';
 
 // ありふれた一般語。ブランド名と1文字違いになることがあるので
 // タイポスクワット候補から外す（finance と binance など）。
@@ -98,6 +99,30 @@ export function matchBrandToken(token, brand) {
   return null;
 }
 
+/**
+ * ブランド名を崩した語を探す。
+ * 編集距離2まで、または先頭4文字以上を共有するもの。
+ * 単独では鳴らさず、登録ドメインが機械生成らしいときだけ使う。
+ */
+function findBrandLikeToken(tokens, brands) {
+  for (const raw of tokens) {
+    const token = collapse(raw);
+    if (token.length < 4 || COMMON_WORDS.has(token)) continue;
+    for (const brand of brands) {
+      for (const domain of brand.domains) {
+        const brandName = collapse(splitHost(domain).name || domain.split('.')[0]);
+        if (brandName.length < 4 || token === brandName) continue;
+        const sharedPrefix = Math.max(4, brandName.length - 1);
+        if (token.length >= sharedPrefix && token.slice(0, sharedPrefix) === brandName.slice(0, sharedPrefix)) {
+          return { brand, token: raw, reason: 'prefix' };
+        }
+        if (levenshtein(token, brandName, 2) <= 2) return { brand, token: raw, reason: 'distance' };
+      }
+    }
+  }
+  return null;
+}
+
 function findBrandInTokens(tokens, brands) {
   for (const token of tokens) {
     for (const brand of brands) {
@@ -130,8 +155,14 @@ function findLookalike(f, brands) {
   const collapsedName = f.collapsedName;
   // 「mercarl-jp.shop」のようにブランド語がトークンの片方だけの場合も見る
   const brandWords = brandWordSet(brands);
-  const candidates = [...new Set([collapsedName, ...f.nameTokens.map((t) => collapse(t))])]
-    .filter((c) => c.length >= 5 && !brandWords.has(c) && !COMMON_WORDS.has(c));
+  // サブドメイン側のトークンも見る。
+  // 「oricvn.zmbc3c.info」のように、使い捨てドメインの前にブランド名を
+  // 少し崩して置く形は国内フィッシングで非常に多い。
+  const candidates = [...new Set([
+    collapsedName,
+    ...f.nameTokens.map((t) => collapse(t)),
+    ...f.subTokens.map((t) => collapse(t)),
+  ])].filter((c) => c.length >= 5 && !brandWords.has(c) && !COMMON_WORDS.has(c));
 
   for (const brand of brands) {
     for (const domain of brand.domains) {
@@ -272,6 +303,25 @@ export function evaluateRules(f, opt = {}) {
     }
   }
 
+  // 使い捨てドメインの前に、ブランド名を崩した語を置く形。
+  //   oricvn.zmbc3c.info（orico）、vlew.xxxx.top（View）など国内で非常に多い。
+  // 距離だけを緩めると ripple.com ↔ apple のような誤検知を生むので、
+  // 「登録ドメインが機械生成らしい」ことと組み合わせたときだけ鳴らす。
+  if (!owner && f.subTokens.length) {
+    const nameRandomness = randomnessScore(f.nameUnicode) ?? 0;
+    const throwawayHost = nameRandomness >= 0.5
+      || (f.name.length >= 10 && f.maxConsonantRun >= 5);
+    if (throwawayHost) {
+      const nearBrand = findBrandLikeToken(f.subTokens, brands);
+      if (nearBrand) {
+        add('brandlike-sub-on-throwaway', 0.55,
+          '使い捨てらしいドメインに、ブランド名に似た名前が付いています',
+          `「${nearBrand.token}」は ${nearBrand.brand.id} に似ていますが、`
+          + `実際の登録ドメインは ${f.registrable} です。`);
+      }
+    }
+  }
+
   // --- ドメイン構造 -----------------------------------------------------
   const fakeSuffixInSub = f.subTokens.filter((t) => FAKE_SUFFIX_TOKENS.has(t)).length;
   if (fakeSuffixInSub >= 2 || (fakeSuffixInSub >= 1 && f.subLabels.length >= 2)) {
@@ -295,9 +345,24 @@ export function evaluateRules(f, opt = {}) {
   }
   // 子音の連続だけを条件にすると、数字混じりの自動生成名（a8f3k29dj4mfs…）を
   // 取り逃す。エントロピーは長い複合語でも簡単に上がるので使わない。
-  if (f.name.length >= 10
-      && (f.maxConsonantRun >= 5 || digitRatioIgnoringYear(f.name) >= 0.25)) {
+  const heuristicRandom = f.name.length >= 10
+    && (f.maxConsonantRun >= 5 || digitRatioIgnoringYear(f.nameUnicode) >= 0.25);
+  if (heuristicRandom) {
     add('random-domain-name', 0.4, '機械生成されたようなドメイン名', `${f.registrable}`);
+  } else {
+    // 実在ドメイン20万件から作った文字n-gramモデルで、名前の「現れにくさ」を測る。
+    // 子音の連続や数字の比率では拾えない並び（x7f3k9qz2m など）を捉える。
+    // 非ラテン文字の名前は対象外（国際化ドメインを巻き込まないため）。
+    // 短い名前ほど偶然そう見えやすいので、要求する異常さを上げる。
+    // zmbc3c のような6文字でも、統計から大きく外れていれば拾う。
+    const randomness = randomnessScore(f.nameUnicode);
+    const minRandomness = f.nameUnicode.length >= 8 ? 0.4 : 0.6;
+    if (randomness !== null && randomness >= minRandomness && f.nameUnicode.length >= 5) {
+      add('unlikely-domain-name', Math.min(0.65, 0.25 + randomness * 0.4),
+        '実在するドメイン名の並びから大きく外れています',
+        `${f.registrableUnicode} は、20万件の実在ドメインの統計では下位${
+          randomness >= 0.99 ? '0.1' : (5 - randomness * 4.9).toFixed(1)}%に入る並びです。`);
+    }
   }
   if (f.hyphenCount >= 4) {
     add('many-hyphens', 0.3, 'ハイフンが多いドメイン', `ハイフン ${f.hyphenCount} 個。`);

@@ -32,7 +32,7 @@ test('ポップアップでURLを手動判定できる', async ({ context, exten
 
   await expect(page.locator('#verdict')).toHaveText('危険');
   await expect(page.locator('#host')).toHaveText('amazon.co.jp.account-verify.x7fk2p.top');
-  await expect(page.locator('#score')).toHaveText(/^9\d$/);
+  await expect(page.locator('#score')).toHaveText(/^(9\d|100)$/);
   await expect(page.locator('#signals .signal').first()).toContainText('ブランド名');
 });
 

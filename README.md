@@ -230,9 +230,11 @@ popular domains and official brand domains, so a compromised page on a legitimat
 take down the whole site.
 
 ```bash
-node tools/build-blocklist.mjs \
-  --source=openphish:https://openphish.com/feed.txt \
-  --source=plain:./data/private-feed.txt \
+npm run blocklist -- \
+  --source=jpcert:./data/jpcert-2026.csv \
+  --source=phishtank:http://data.phishtank.com/data/online-valid.csv \
+  --source=phishunt:https://phishunt.io/feed.txt \
+  --source=stix:./data/opencti-export.json \
   --malware-source=urlhaus:https://urlhaus.abuse.ch/downloads/csv_online/ \
   --out=extension/data/blocklist.json --ttl-days=7
 ```
@@ -617,22 +619,30 @@ tests/               ユニット(Node) + E2E(Playwright/ヘッドレスChromium
 
 ### 既知リストに取り込めるフィード（`tools/build-blocklist.mjs`）
 
-| ソース | 形式 | 備考 |
+| ソース | 形式 | 実際に取得して確認した内容 |
 |---|---|---|
-| OpenPhish community feed | `openphish:` | 無償枠あり。利用条件は提供元の規約に従うこと |
-| PhishTank | `phishtank:` | CSV。APIキー・利用条件の確認が必要 |
-| URLhaus (abuse.ch) | `urlhaus:` | マルウェア配布URL中心 |
+| **JPCERT/CC** [phishurl-list](https://github.com/JPCERTCC/phishurl-list) | `jpcert:` | 12,055件（2026年1〜5月）。**詐称ブランド名付き**で、国内評価にそのまま使える |
+| PhishTank | `phishtank:` | 76,672件。公開CSVを鍵なしで取得できた。`target` 列にブランド名 |
+| URLhaus (abuse.ch) | `urlhaus:` | 13,715件。**全件がマルウェア配布でフィッシングは0件**。`--malware-source=` で別表に入れる |
+| phishunt.io | `phishunt:` | 873件。1行1URLのプレーンテキスト |
+| OpenPhish community | `openphish:` | 300件（無償版の収録数） |
+| **OpenCTI など脅威インテリジェンス基盤** | `stix:` | STIX 2.1 バンドル。`url` observable と indicator の pattern を読む |
 | 組織で受け取っている非公開フィード | `plain:` / `json:` | **ローカルファイルとして渡す**。ネットワークに出ない |
-| 任意のURLリスト | `plain:` | 自組織のブランド監視結果など |
+
+全部を合わせたビルドの実績: **フィッシング 95,054 URL + マルウェア 8,334 URL → 1.1MB**。
+
+> PhishStats は公開エンドポイントが404を返す状態で、取得方法を確認できませんでした。
 
 生成物に残るのは **SHA-256の先頭64bitだけ**で、元のURLは含まれません。
 ホスト単位・ドメイン単位への拡大は、共有ホスティング（`pages.dev` 等）・著名ドメイン・
 公式ブランドドメインを自動的に除外し、巻き添えを防ぎます。
 
 ```bash
-node tools/build-blocklist.mjs \
-  --source=openphish:https://openphish.com/feed.txt \
-  --source=plain:./data/private-feed.txt \
+npm run blocklist -- \
+  --source=jpcert:./data/jpcert-2026.csv \
+  --source=phishtank:http://data.phishtank.com/data/online-valid.csv \
+  --source=phishunt:https://phishunt.io/feed.txt \
+  --source=stix:./data/opencti-export.json \
   --malware-source=urlhaus:https://urlhaus.abuse.ch/downloads/csv_online/ \
   --out=extension/data/blocklist.json --ttl-days=7
 ```

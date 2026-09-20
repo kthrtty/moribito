@@ -134,6 +134,8 @@ export const SUSPICIOUS_TLDS = new Set([
   'review', 'bid', 'stream', 'date', 'party', 'trade', 'science', 'cam', 'icu',
   'shop', 'monster', 'quest', 'sbs', 'cfd', 'bond', 'rodeo', 'autos', 'boats',
   'cyou', 'lol', 'mom', 'uno', 'zip', 'mov', 'best', 'beauty', 'hair', 'skin',
+  'info', 'biz', 'online', 'site', 'website', 'space', 'store', 'fun', 'life',
+  'live', 'today', 'world', 'tech', 'vip', 'asia', 'pro', 'one', 'cc', 'su',
   'makeup', 'christmas', 'gdn', 'wang', 'cn.com', 'ru.com',
 ]);
 // 頻繁に訪れる大手ドメイン（誤検知を抑えるためのホワイト寄せ）

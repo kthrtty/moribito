@@ -7,7 +7,11 @@
  *     --source=plain:./data/private-feed.txt \
  *     --out=extension/data/blocklist.json --ttl-days=14
  *
- * 対応形式: openphish / phishtank / urlhaus / plain / json（URLかローカルファイル）
+ * 対応形式: openphish / phishtank / urlhaus / jpcert / phishunt / stix / plain / json
+ *           （URLかローカルファイル）
+ *
+ * stix は OpenCTI などの脅威インテリジェンス基盤からの書き出しを想定している。
+ * STIX 2.1 バンドルの url observable と、indicator の pattern を読む。
  * 組織で受け取っている非公開フィード（会員向けのものなど）は plain: で
  * ローカルファイルとして渡す。URLそのものは成果物に残らず、SHA-256の先頭64bitだけが残る。
  *
@@ -64,13 +68,32 @@ function parse(format, text) {
   const lines = text.split(/\r?\n/);
   switch (format) {
     case 'openphish':
+    case 'phishunt':
     case 'plain':
       return lines.map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+
+    case 'stix': {
+      // OpenCTI などからの STIX 2.1 バンドル。
+      // url observable と、indicator の pattern [url:value = '...'] を拾う。
+      const bundle = JSON.parse(text);
+      const objects = Array.isArray(bundle) ? bundle : bundle.objects ?? [];
+      const urls = [];
+      for (const object of objects) {
+        if (object?.type === 'url' && typeof object.value === 'string') {
+          urls.push(object.value);
+        } else if (object?.type === 'indicator' && typeof object.pattern === 'string') {
+          for (const m of object.pattern.matchAll(/url:value\s*=\s*'([^']+)'/g)) urls.push(m[1]);
+          for (const m of object.pattern.matchAll(/url:value\s*=\s*"([^"]+)"/g)) urls.push(m[1]);
+        }
+      }
+      return urls;
+    }
     case 'json': {
       const data = JSON.parse(text);
       return (Array.isArray(data) ? data : data.urls ?? []).map((e) => (typeof e === 'string' ? e : e.url)).filter(Boolean);
     }
     case 'phishtank':
+    case 'jpcert':
     case 'urlhaus': {
       const rows = lines.filter((l) => l && !l.startsWith('#'));
       if (!rows.length) return [];

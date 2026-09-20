@@ -204,7 +204,8 @@ test('無料ホスティング + 自動生成らしい名前は警告する', ()
     'https://porezna-uprava-5e120.firebaseapp.com/',
   ]) {
     const r = analyzeUrl(url);
-    assert.equal(r.verdict, 'warn', `${url} が ${r.verdict} になっている`);
+    // 名前の異常さが強いものはブロックまで届く。通過しないことを担保する。
+    assert.notEqual(r.verdict, 'allow', `${url} が通過している`);
     assert.ok(r.signals.some((s) => s.id === 'free-hosting-random'));
   }
 });
