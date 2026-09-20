@@ -17,7 +17,10 @@ async function openPopup(context, extensionId) {
 async function openOptions(context, extensionId) {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/src/ui/options.html`);
-  await expect(page.locator('#block')).not.toHaveValue(''); // 設定反映済みの印
+  // input[type=range] はブラウザが初期値（min/maxの中間）を勝手に入れるので、
+  // 「値が空でない」では初期化待ちにならない。
+  // 出力欄(<output>)は空から始まるので、こちらが埋まるのを待つ。
+  await expect(page.locator('#block-out')).not.toHaveText('');
   return page;
 }
 
@@ -94,11 +97,12 @@ test('設定画面のモデル状態表示はモデル未配置を正しく伝�
   await expect(page.locator('#model-state')).toHaveText(/モデル未配置|未ロード/);
 });
 
-test('設定を初期化できる', async ({ context, extensionId, serviceWorker }) => {
-  const stored = () => serviceWorker.evaluate(
-    () => chrome.storage.sync.get({ blockThreshold: null }).then((s) => s.blockThreshold));
-
+test('設定を初期化できる', async ({ context, extensionId }) => {
   const page = await openOptions(context, extensionId);
+  // 保存結果は設定画面自身から読む。service worker はアイドルで終了しうるので、
+  // そちら経由で読むとフルラン時だけ不安定になる。
+  const stored = () => page.evaluate(
+    () => chrome.storage.sync.get({ blockThreshold: null }).then((s) => s.blockThreshold));
 
   await page.locator('#block').fill('0.6');
   await page.locator('#save').click();

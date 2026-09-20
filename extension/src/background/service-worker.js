@@ -7,6 +7,7 @@
 import { analyzeUrl, analyzeWithPage, withExtraSignals } from '../core/analyze.js';
 import { extractFeatures } from '../core/features.js';
 import { evaluatePageEvidence } from '../core/page-evidence.js';
+import { loadModel as loadUrlModel, predictHost } from '../core/url-classifier.js';
 import { runDetection, resolveDetectors, describeDetectors } from '../core/pipeline.js';
 import { DETECTOR_CATALOG } from '../core/detectors/index.js';
 import { loadSettings, saveSettings, thresholdsOf, resolveProviders, detectorConfigOf, DEFAULT_SETTINGS } from '../core/settings.js';
@@ -22,6 +23,7 @@ const SECRET_IDS = new Set(['jev']);
 const MAX_SECRET_LENGTH = 500;
 
 const BLOCKLIST_PATH = 'data/blocklist.json';
+const URL_MODEL_PATH = 'model/url-classifier.json';
 const BLOCKLIST_ALARM = 'blocklist-update';
 
 const verdictCache = new Map();   // url -> result
@@ -44,6 +46,7 @@ const tabVerdicts = new Map();    // tabId -> result
 let settingsCache = null;
 let offscreenReady = null;
 let blocklistPromise = null;
+let urlModelPromise = null;
 
 // ---------------------------------------------------------------- settings
 async function settings() {
@@ -117,6 +120,24 @@ function loadBlocklist() {
     }
   })();
   return blocklistPromise;
+}
+
+/**
+ * URL分類器を読み込む。同梱していなければ null のまま（ルールだけで動く）。
+ * ONNXランタイムは使わない。内積とsigmoidだけなので素のJSで完結する。
+ */
+function loadUrlClassifier() {
+  if (urlModelPromise) return urlModelPromise;
+  urlModelPromise = (async () => {
+    try {
+      const res = await fetch(chrome.runtime.getURL(URL_MODEL_PATH));
+      if (!res.ok) return null;
+      return loadUrlModel(await res.json());
+    } catch {
+      return null; // 未配置。ルールのみで判定する。
+    }
+  })();
+  return urlModelPromise;
 }
 
 async function blocklistStatus() {
@@ -247,8 +268,13 @@ async function buildContext(url, s, extra = {}) {
       cache: cacheService,
       fetchImpl: (...args) => fetch(...args),
       classifyUrl: async (target) => {
-        const out = await askWorker({ type: 'predict', url: target });
-        return typeof out?.probability === 'number' ? out.probability : null;
+        const model = await loadUrlClassifier();
+        if (!model) return null;
+        try {
+          return predictHost(new URL(target).hostname, model);
+        } catch {
+          return null;
+        }
       },
       // ローカルLLM/小型テキスト分類器の差し込み口。未配置なら null を返す。
       classifyText: async (text) => {
@@ -642,7 +668,7 @@ chrome.runtime.onStartup?.addListener(() => {
 // テスト/デバッグから service worker 内の判定を直接叩けるようにする
 globalThis.moribito = {
   evaluate, analyzeUrl, analyzeWithPage, askWorker, ensureOffscreen, applyPageEvidence,
-  loadBlocklist, blocklistStatus, updateBlocklist, runDetection, buildContext,
+  loadBlocklist, blocklistStatus, updateBlocklist, runDetection, buildContext, loadUrlClassifier,
   detectors: () => resolveDetectors(DETECTOR_CATALOG, {}),
   resetBlocklistCache: () => { blocklistPromise = null; verdictCache.clear(); },
 };

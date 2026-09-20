@@ -6,6 +6,8 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,
+  // 再試行はしない。不安定さは隠さず落とす。
+  retries: 0,
   reporter: [['list']],
   use: { trace: 'off', video: 'off', screenshot: 'off' },
 });

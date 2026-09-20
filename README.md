@@ -265,8 +265,27 @@ certificates containing brand keywords ahead of time and ship them like the bloc
 
 ## Local models (optional)
 
-Drop an ONNX model into `extension/model/` and the grey band gets a second opinion on-device.
-Without it, the rules run alone. Build instructions are in `tools/train/README.md`.
+**No model is bundled.** A hostname classifier was trained on PhiUSIIL and then rejected:
+it scored AUC 0.94 on a domain-disjoint split, yet flagged `github.com`, `docs.google.com`
+and `wikipedia.org` as phishing. The dataset's benign side is `www.`-prefixed home pages of
+obscure sites, so the model had learned "starts with `www.` = legitimate" and
+"short famous domain = anomalous". Adding 150k top-sites as benign fixed those specific
+false positives but dropped held-out AUC to 0.73 with a 3.4% false-positive rate — too high
+for an always-on tool. The full write-up is in [docs/evaluation.md](docs/evaluation.md).
+
+What ships instead is the machinery, so the attempt can be repeated with better data:
+
+| | |
+|---|---|
+| `src/core/url-classifier.js` | inference — hashed char n-grams, dot product, sigmoid. No ONNX, no WASM, ~256KB of int8 weights |
+| `tools/train/train-url-classifier.mjs` | training, Node only. `--scope` and `--benign-list` switch the variants |
+| `tools/train/validate-url-classifier.mjs` | **the shipping gate**: exits non-zero if a single legitimate site is flagged |
+
+The lesson worth carrying: a split of the same dataset — even a domain-disjoint one — cannot
+decide whether a model is shippable. The dataset's own quirks live on both sides of the split.
+
+Drop an ONNX model into `extension/model/` instead and the grey band gets a second opinion
+on-device. Build instructions are in `tools/train/README.md`.
 
 Because nothing is sent to a hosted model at runtime, a hosted probability model is only used
 **at development time, as the teacher for distillation**:
@@ -792,7 +811,33 @@ High の2件は、この種のツール特有のものです。
   （フィッシング対策ツールが、自分の警告文の書き換えを許していた）
 - 「危険を承知で続行」が、メッセージで申告されたホスト名を信用して許可リストに登録していた
 
-## 10. テスト
+## 10. URL分類器を作って、出荷しなかった話
+
+ルール単体の recall 2.1% を埋めるため、PhiUSIIL の正解ラベルから
+ホスト名の文字n-gram分類器を学習しました。**結果は出荷不可**です。
+
+ドメイン単位で分割した検証では AUC 0.941 という良い数字が出ましたが、
+学習に使っていない別コーパスにかけると、**`github.com`・`docs.google.com`・
+`wikipedia.org` をフィッシング判定**しました。
+PhiUSIIL の正規側が `www.` 付きトップページ中心だったため、
+モデルは「`www.` で始まれば正規」というデータセットの癖を学んでいたためです。
+この癖は訓練側にも検証側にも同じように存在するので、**分割をどう工夫しても数字は良いまま**になります。
+
+トップサイト15万件を正規側に足して学習し直すと、その誤検知は消えましたが、
+検証AUCは 0.733、誤検知率 3.41% まで落ちました。これが正味の実力で、
+知らない正規ドメイン29件に1件を疑うことになります。常駐ツールとしては採れません。
+
+学習済みの重みは同梱していません。一方、再挑戦の足場として次を残しています。
+
+| 残したもの | 用途 |
+|---|---|
+| `src/core/url-classifier.js` | 推論。外部依存ゼロ（内積とsigmoidのみ、int8で約256KB） |
+| `tools/train/train-url-classifier.mjs` | 学習。Nodeだけで完結。`--scope` `--benign-list` で変種を切替 |
+| `tools/train/validate-url-classifier.mjs` | **出荷判定**。正規サイトを1件でも誤検知したら exit 1 |
+
+詳細は [docs/evaluation.md](docs/evaluation.md) に記録しました。
+
+## 11. テスト
 
 ```bash
 npm run test:unit   # 判定ロジック（Node）
@@ -811,7 +856,7 @@ offscreenのWorkerが応答すること、コンテンツ検査でグレーのUR
 
 ---
 
-## 11. 既知の限界
+## 12. 既知の限界
 
 - **cross-originのiframe内のフォームは読めません**（ブラウザの制約）
 - canvas製の擬似キーボードなど、DOMに現れない入力は検出できません
@@ -820,7 +865,7 @@ offscreenのWorkerが応答すること、コンテンツ検査でグレーのUR
 - 同梱のPSLはサブセットです。珍しいTLDを正確に扱うには `tools/build-psl.mjs` を実行してください
 - ブランド辞書に無いブランドの詐称は、構造的な特徴でしか拾えません
 
-## 12. 検討中（未実装）
+## 13. 検討中（未実装）
 
 - Certificate Transparency 由来の「新規証明書 × ブランド語」リスト
 - ~~Safe Browsing など複数の評価提供元を横断参照する層~~ → プロバイダ層として実装済み（既定で無効）。
