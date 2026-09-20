@@ -119,16 +119,29 @@
     const phoneMatches = visibleText.match(
       /(?:0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}|\+\d{1,3}[-\s]?\d{2,4}[-\s]?\d{3,4}[-\s]?\d{3,4}|1[-\s]?8(?:00|88|77|66)[-\s]?\d{3}[-\s]?\d{4})/g,
     ) ?? [];
+    // 画面を覆う固定表示を探し、その中に電話番号があるかを見る。
+    // 「全画面の警告の中に電話番号がある」は、正規サイトの動画や
+    // クッキーバナーとサポート詐欺を分ける、最も確実な構造的指標。
+    const modals = [...document.querySelectorAll('div, section, aside')].slice(0, 400).filter((el) => {
+      const style = getComputedStyle(el);
+      if (style.position !== 'fixed') return false;
+      if (Number(style.zIndex) <= 1000) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.height > innerHeight * 0.6 && rect.width > innerWidth * 0.6;
+    });
+    const phoneInsideModal = modals.some((el) =>
+      el.querySelector('a[href^="tel:"]') !== null
+      || /(?:0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4}|1[-\s]?8(?:00|88|77|66)[-\s]?\d{3}[-\s]?\d{4})/
+        .test(el.innerText ?? ''));
+
     const trapSignals = {
-      // 戻れなくする / 離脱を邪魔する仕掛け
-      beforeUnload: typeof window.onbeforeunload === 'function',
+      // ページ側が設定した onbeforeunload は分離ワールドからは見えないため数えない。
+      // 見えるものだけで判断する。
       fullscreenRequested: Boolean(document.fullscreenElement),
       autoplayAudio: [...document.querySelectorAll('audio, video')].some((m) => m.autoplay && !m.muted),
-      modalOverlayCount: [...document.querySelectorAll('div, section')].slice(0, 400).filter((el) => {
-        const style = getComputedStyle(el);
-        return style.position === 'fixed' && Number(style.zIndex) > 1000
-          && el.getBoundingClientRect().height > innerHeight * 0.6;
-      }).length,
+      modalOverlayCount: modals.length,
+      phoneInsideModal,
+      scrollLocked: getComputedStyle(document.body).overflow === 'hidden',
     };
 
     const crossOriginLoginIframe = [...document.querySelectorAll('iframe[src]')].some((frame) => {
@@ -214,21 +227,43 @@
     (document.body || document.documentElement).append(host);
   }
 
-  if (!window[STATE_KEY]) {
-    window[STATE_KEY] = { reported: false };
+  /** 再評価を依頼する。1ページにつき数回までに抑える。 */
+  function report(trigger) {
+    const state = window[STATE_KEY];
+    if (state.reports >= 3) return;
+    state.reports++;
+    try {
+      chrome.runtime.sendMessage({ type: 'page-evidence', evidence: collect(trigger) });
+    } catch {
+      // 拡張が再読み込みされた等。ページ側には影響させない。
+    }
+  }
 
-    // 実際に入力しようとした瞬間に見直す。後から差し込まれるフォームを取りこぼさない。
+  if (!window[STATE_KEY]) {
+    window[STATE_KEY] = { reports: 0 };
+
+    // 入力しようとした瞬間。後から差し込まれるフォームを取りこぼさない。
     document.addEventListener('focusin', (event) => {
       const el = event.target;
       if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
-      if (window[STATE_KEY].reported) return;
-      window[STATE_KEY].reported = true;
-      try {
-        chrome.runtime.sendMessage({ type: 'page-evidence', evidence: collect('focusin') });
-      } catch {
-        // 拡張が再読み込みされた等。ページ側には影響させない。
-      }
+      report('focusin');
     }, { capture: true, passive: true });
+
+    // ここから下は「入力欄を持たない詐欺」向けの契機。
+    // サポート詐欺は全画面化・音声再生・クリック誘導のいずれかを必ず伴うので、
+    // DOMを監視し続けるのではなく、そのイベント自体を契機にする（常時コストがほぼ無い）。
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement) report('fullscreen');
+    }, { passive: true });
+
+    document.addEventListener('play', (event) => {
+      const el = event.target;
+      if (el && /^(AUDIO|VIDEO)$/.test(el.tagName) && !el.muted) report('audio');
+    }, { capture: true, passive: true, once: true });
+
+    // 最初の操作。詐欺は必ず利用者に何かを押させる。
+    document.addEventListener('pointerdown', () => report('interaction'),
+      { capture: true, passive: true, once: true });
 
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.type === 'show-overlay') {
@@ -240,6 +275,12 @@
       }
       return false;
     });
+  }
+
+  // 監視モード（信頼済みドメイン）では読み込み時の走査をしない。
+  // イベントが起きたときだけ収集するので、通常のページに負担をかけない。
+  if (globalThis.__moribitoMode === 'watch') {
+    return { ok: true, mode: 'watch' };
   }
 
   // この値が executeScript の戻り値になる

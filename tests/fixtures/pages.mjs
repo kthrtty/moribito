@@ -32,7 +32,20 @@ const DELAYED_FORM = `
     }, 200);
   <\/script>`;
 
+/** 正規ドメイン上に広告経由で差し込まれる、サポート詐欺のオーバーレイ */
+const SCAM_OVERLAY = `
+  <h1>ニュース記事</h1>
+  <p>本文です。</p>
+  <audio autoplay src="data:audio/wav;base64,UklGRiQAAABXQVZF"></audio>
+  <div id="scam" style="position:fixed;inset:0;z-index:2147483000;background:#003;color:#fff;height:100vh">
+    <h2>警告: セキュリティの問題が検出されました</h2>
+    <p>サポートへご連絡ください: <a href="tel:0120000000">0120-000-000</a></p>
+  </div>
+  <script>window.onbeforeunload = () => 'stay';<\/script>`;
+
 const ROUTES = [
+  { match: /nikkei\.com\/article\/scam/, html: () => page('日本経済新聞', SCAM_OVERLAY) },
+  { match: /nikkei\.com\/article\/normal/, html: () => page('日本経済新聞', '<h1 id="stub-page">通常の記事</h1><p>本文です。</p>') },
   { match: /mufg-bk-support\.cyou/, html: () => page('MUFG Bank｜ログイン',
       `<p>第三者による不正なアクセスを検知しました。24時間以内にご確認ください。</p>${LOGIN_FORM}`) },
   { match: /apple-id-check\.sbs/, html: () => page('Apple ID — サインイン', LOGIN_FORM) },

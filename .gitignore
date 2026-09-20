@@ -4,6 +4,8 @@ playwright-report/
 /data/
 extension/model/*.onnx
 extension/model/meta.json
+# 学習済みの重みは、検証を通るまでリポジトリに含めない
+extension/model/url-classifier.json
 extension/vendor/
 .venv/
 .DS_Store

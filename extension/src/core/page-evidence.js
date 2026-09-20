@@ -156,13 +156,18 @@ export function evaluatePageEvidence(f, evidence, opt = {}) {
   const add = (id, weight, title, detail) => signals.push({ id, weight, title, detail, from: 'page' });
 
   if (!f?.ok || !evidence?.ok) return signals;
-  if (brandOwning(f.registrable)) return signals; // 公式サイトは対象外
 
-  const demand = credentialDemand(evidence);
-  const claim = brandClaim(evidence.identity, brands);
+  // 信頼済みドメイン（公式・著名）では、入力欄やブランド名の判定はしない。
+  // 正規サイトのログインページを疑うことになるため。
+  // ただし「広告経由で差し込まれた詐欺」は正規ドメイン上でも起きるので、
+  // 構造的な証拠（電話誘導・離脱妨害）だけは見る。
+  const structureOnly = opt.mode === 'structure-only' || Boolean(brandOwning(f.registrable));
+
+  const demand = structureOnly ? { value: 0, kinds: [], otpGroup: false, seed: false } : credentialDemand(evidence);
+  const claim = structureOnly ? null : brandClaim(evidence.identity, brands);
 
   // ページが別ブランドを名乗っている
-  if (claim) {
+  if (!structureOnly && claim) {
     const weight = claim.strong
       ? (demand.value >= 2 ? 0.85 : demand.value === 1 ? 0.55 : 0.3)
       : (demand.value >= 2 ? 0.6 : 0.25);
@@ -173,7 +178,7 @@ export function evaluatePageEvidence(f, evidence, opt = {}) {
   }
 
   // 認証情報を求めるフォームがある
-  if (demand.value >= 3) {
+  if (!structureOnly && demand.value >= 3) {
     if (!claim) {
       add('credential-form', 0.35, '認証情報を入力させるフォーム',
         `${labelKinds(demand.kinds)} の入力欄があります。`);
@@ -182,19 +187,19 @@ export function evaluatePageEvidence(f, evidence, opt = {}) {
       add('credential-form-insecure', 0.6, '暗号化なしで認証情報を送信するフォーム',
         'httpのページで認証情報を入力させています。通信路で盗み見られます。');
     }
-  } else if (demand.otpGroup) {
+  } else if (!structureOnly && demand.otpGroup) {
     add('otp-entry-form', 0.3, 'ワンタイムコードの入力欄',
       '認証コードだけを抜き取る多段フィッシングでよく使われる形です。');
   }
 
-  if (demand.seed) {
+  if (!structureOnly && demand.seed) {
     add('seed-phrase-form', 0.75, '復元フレーズ・秘密鍵の入力欄',
       '正規のサービスがこれらを入力させることはありません。');
   }
 
   // 送信先が別ドメイン
   const pageRegistrable = f.registrable;
-  for (const form of evidence.forms ?? []) {
+  for (const form of structureOnly ? [] : (evidence.forms ?? [])) {
     if (form.searchLike || !form.actionHost) continue;
     const target = splitHost(form.actionHost).registrable;
     if (!target || target === pageRegistrable) continue;
@@ -207,7 +212,7 @@ export function evaluatePageEvidence(f, evidence, opt = {}) {
   }
 
   // GETで秘密を送る（URLに残る＝正規実装ではまずやらない）
-  if ((evidence.forms ?? []).some((form) => !form.searchLike && form.method === 'get'
+  if (!structureOnly && (evidence.forms ?? []).some((form) => !form.searchLike && form.method === 'get'
       && credentialDemand({ forms: [form] }).value >= 3)) {
     add('credential-form-get', 0.5, '認証情報をURLに載せて送信するフォーム',
       '正規のログイン実装ではまず行いません。');
@@ -220,19 +225,30 @@ export function evaluatePageEvidence(f, evidence, opt = {}) {
   const hasPhoneLure = (evidence.telLinks?.length ?? 0) > 0 || (evidence.phoneNumbers?.length ?? 0) > 0;
   const traps = evidence.trapSignals ?? {};
   const trapList = [
-    [traps.beforeUnload, '離脱時の警告'],
     [traps.fullscreenRequested, '全画面化'],
     [traps.autoplayAudio, '音声の自動再生'],
     [(traps.modalOverlayCount ?? 0) > 0, '画面を覆う固定表示'],
+    [traps.scrollLocked, 'スクロールの固定'],
   ].filter(([on]) => on).map(([, label]) => label);
 
-  if (hasPhoneLure && trapList.length >= 2) {
+  // 「画面を覆う警告の中に電話番号がある」構成。
+  // 正規サイトの全画面動画やクッキーバナーとは、ここで明確に分かれる。
+  const phoneInsideModal = Boolean(traps.phoneInsideModal);
+
+  // 信頼済みドメイン（広告経由の差し込みを想定）では、
+  // 「覆いの中に電話番号」という強い構成が揃ったときだけ鳴らす。
+  const scamStructure = structureOnly
+    ? phoneInsideModal && trapList.length >= 1
+    : hasPhoneLure && trapList.length >= 2;
+
+  if (scamStructure) {
     add('support-scam-structure', claim ? 0.9 : 0.75,
       '電話をかけさせ、ページから離れさせない作り',
-      `電話番号を表示しつつ、${trapList.join('・')}で操作を妨げています。`
+      `${phoneInsideModal ? '画面を覆う表示の中に電話番号を出し、' : '電話番号を表示しつつ、'}`
+      + `${trapList.join('・')}で操作を妨げています。`
       + (claim ? ` ${claim.brand.id} を名乗っていますが別ドメインです。` : '')
       + ' 表示された番号には電話しないでください。');
-  } else if (hasPhoneLure && claim) {
+  } else if (!structureOnly && hasPhoneLure && claim) {
     add('phone-lure-brand', 0.6, '別ドメインでブランドを名乗り、電話番号を案内しています',
       `${claim.brand.id} の正規ドメインではありません。サポート詐欺の典型的な構成です。`);
   } else if (trapList.length >= 3) {
@@ -240,7 +256,7 @@ export function evaluatePageEvidence(f, evidence, opt = {}) {
       `${trapList.join('・')}が同時に使われています。`);
   }
 
-  if (evidence.crossOriginLoginIframe) {
+  if (!structureOnly && evidence.crossOriginLoginIframe) {
     add('cross-origin-login-iframe', 0.3, '別ドメインのログイン画面を埋め込んでいます',
       '正規サイトを枠内に見せて、周囲で入力を横取りする手口があります。');
   }

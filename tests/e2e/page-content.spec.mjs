@@ -74,3 +74,40 @@ test('表示内容の検査をOFFにすると内容では止めない', async ({
 
   await expect(page).toHaveURL('http://mufg-bk-support.cyou/login');
 });
+
+test('正規ドメイン上に差し込まれたサポート詐欺を、操作した時点で警告する', async ({ context, serviceWorker }) => {
+  const page = await context.newPage();
+  // nikkei.com は著名ドメインとして判定を打ち切られる。
+  // それでも広告経由の詐欺は起こりうるので、構造だけは見る。
+  await goto(page, 'https://www.nikkei.com/article/scam');
+  await page.waitForSelector('#scam', { timeout: 10_000 });
+
+  // 読み込んだだけでは何もしない（走査コストをかけない）
+  await expect(page.locator('#moribito-overlay')).toHaveCount(0);
+
+  // 利用者が操作した時点で評価する
+  await page.locator('#scam').click({ position: { x: 5, y: 5 } });
+  await expect(page.locator('#moribito-overlay')).toHaveCount(1, { timeout: 10_000 });
+
+  // ドメイン自体は正規なので、ページの差し替えまではしない
+  await expect(page).toHaveURL('https://www.nikkei.com/article/scam');
+});
+
+test('正規ドメインの通常のページでは警告しない', async ({ context, serviceWorker }) => {
+  const page = await context.newPage();
+  await goto(page, 'https://www.nikkei.com/article/normal');
+  await page.waitForSelector('#stub-page');
+  await page.locator('#stub-page').click();
+  await page.waitForTimeout(1200);
+
+  await expect(page.locator('#moribito-overlay')).toHaveCount(0);
+});
+
+test('正規ドメインから転送された先のフィッシングもブロックする', async ({ context, serviceWorker }) => {
+  const page = await context.newPage();
+  // サーバーリダイレクトの最終URLは onBeforeNavigate に来ないため、
+  // 確定時にもう一度判定していないと素通りする
+  await goto(page, 'https://www.google.com/redirect-to-phishing');
+  await page.waitForURL(WARNING_URL_RE, { timeout: 15_000 });
+  await expect(page.locator('#host')).toHaveText('amazon.co.jp.account-verify.x7fk2p.top');
+});

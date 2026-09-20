@@ -16,6 +16,13 @@ const EXTENSION_PATH = path.resolve(import.meta.dirname, '../../extension');
 async function stubNetwork(context) {
   await context.route(/^https?:\/\//i, async (route) => {
     const url = route.request().url();
+    // 正規ドメインからフィッシングへのサーバーリダイレクトを再現する
+    if (url.includes('/redirect-to-phishing')) {
+      return route.fulfill({
+        status: 302,
+        headers: { location: 'http://amazon.co.jp.account-verify.x7fk2p.top/signin' },
+      });
+    }
     await route.fulfill({
       status: 200,
       contentType: 'text/html; charset=utf-8',

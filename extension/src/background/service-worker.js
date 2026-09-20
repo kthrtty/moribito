@@ -6,6 +6,7 @@
  */
 import { analyzeUrl, analyzeWithPage, withExtraSignals } from '../core/analyze.js';
 import { extractFeatures } from '../core/features.js';
+import { evaluatePageEvidence } from '../core/page-evidence.js';
 import { runDetection, resolveDetectors, describeDetectors } from '../core/pipeline.js';
 import { DETECTOR_CATALOG } from '../core/detectors/index.js';
 import { loadSettings, saveSettings, thresholdsOf, resolveProviders, detectorConfigOf, DEFAULT_SETTINGS } from '../core/settings.js';
@@ -349,24 +350,52 @@ chrome.webNavigation.onBeforeNavigate.addListener(
 );
 
 // ------------------------------------------------- 表示コンテンツの検査
-/** URLだけで決着しないページに限り、内容を見に行く。 */
-function shouldInspectPage(result) {
-  if (!result?.ok) return false;
-  if (result.reason) return false;            // 公式・著名・許可済み・LAN・対象外
-  return result.verdict !== 'block';          // ブロック済みなら不要
+/**
+ * どの深さで内容を見るか。
+ *   'full'  … URLだけで決着しなかったページ。入力欄もブランド名も見る
+ *   'watch' … 公式・著名ドメイン。走査はせず、全画面化などのイベントが
+ *             起きたときだけ収集する（広告経由で差し込まれる詐欺への備え）
+ *   null    … 見ない
+ */
+function probeModeFor(result) {
+  if (!result?.ok) return null;
+  if (result.verdict === 'block') return null;
+  if (result.reason === 'non-web-scheme' || result.reason === 'private-network') return null;
+  return result.reason ? 'watch' : 'full';
 }
 
 async function probePage(tabId, url, result) {
   const s = await settings();
-  if (!s.inspectPages || !shouldInspectPage(result)) return;
+  const mode = probeModeFor(result);
+  if (!s.inspectPages || !mode) return;
   try {
+    // files 指定では引数を渡せないので、先に印を置いてから本体を注入する
+    await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      func: (value) => { globalThis.__moribitoMode = value; },
+      args: [mode],
+    });
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [0] },
       files: [PROBE_PATH],
     });
-    if (injection?.result) await applyPageEvidence(tabId, url, injection.result);
+    if (mode === 'full' && injection?.result?.forms) {
+      await applyPageEvidence(tabId, url, injection.result);
+    }
   } catch {
     // chrome:// や権限のないページ、遷移済みなど。URL判定の結果をそのまま使う。
+  }
+}
+
+/** 警告バーを出す（ページを差し替えない）。 */
+async function showOverlay(tabId, signals) {
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'show-overlay',
+      reasons: signals.map((signal) => signal.title),
+    });
+  } catch {
+    // プローブが入っていないタブ
   }
 }
 
@@ -375,11 +404,25 @@ async function applyPageEvidence(tabId, url, evidence) {
   const s = await settings();
   if (!s.enabled || !s.inspectPages) return;
 
-  const before = await evaluate(url);
+  const base = await evaluate(url);
+  const mode = probeModeFor(base);
+  if (!mode) return;
+
+  // 公式・著名ドメイン: 正規サイトのログインページを疑わないよう、
+  // 構造的な詐欺（電話誘導＋離脱妨害）だけを見る。
+  // ドメイン自体は正規なので、ページの差し替えまではしない。
+  if (mode === 'watch') {
+    const signals = evaluatePageEvidence(extractFeatures(url), evidence, { mode: 'structure-only' });
+    if (!signals.length) return;
+    await bumpStat('warned');
+    await showOverlay(tabId, signals);
+    return;
+  }
+
   const combined = await evaluate(url, { useCache: false, evidence });
   const pageSignals = (combined.signals ?? []).filter((signal) => signal.from === 'page' || signal.from === 'model');
   combined.pageSignals = pageSignals;
-  if (!pageSignals.length || combined.verdict === before.verdict && combined.verdict === 'allow') return;
+  if (!pageSignals.length) return;
 
   rememberVerdict(url, combined);
   tabVerdicts.set(tabId, combined);
@@ -394,16 +437,34 @@ async function applyPageEvidence(tabId, url, evidence) {
     await blockNavigation(tabId, url, combined);
   } else if (combined.verdict === 'warn') {
     await bumpStat('warned');
-    try {
-      await chrome.tabs.sendMessage(tabId, {
-        type: 'show-overlay',
-        reasons: combined.pageSignals.map((signal) => signal.title),
-      });
-    } catch {
-      // プローブが入っていないタブ
-    }
+    await showOverlay(tabId, pageSignals);
   }
 }
+
+/**
+ * サーバーリダイレクトの最終URLは onBeforeNavigate に来ない。
+ * 正規サイトから転送された先の危険なページを取りこぼさないよう、
+ * 確定した時点でもう一度判定する。
+ */
+chrome.webNavigation.onCommitted.addListener(
+  async (details) => {
+    if (details.frameId !== 0) return;
+    if (!details.transitionQualifiers?.some((q) => q.includes('redirect'))) return;
+
+    const s = await settings();
+    if (!s.enabled) return;
+    const result = await evaluate(details.url);
+    if (result.verdict !== 'block') return;
+
+    const key = `bypass:${result.registrable || result.host}`;
+    const bypass = await chrome.storage.session.get(key);
+    if (bypass[key]) return;
+
+    await bumpStat('blocked');
+    await blockNavigation(details.tabId, details.url, result);
+  },
+  { url: [{ schemes: ['http', 'https'] }] },
+);
 
 // onCommitted の時点ではDOMがまだ空なので、解析が済む onDOMContentLoaded で見る。
 // 後から差し込まれるフォームは、content script の focusin が拾う。
@@ -412,7 +473,9 @@ chrome.webNavigation.onDOMContentLoaded.addListener(
     if (details.frameId !== 0) return;
     const s = await settings();
     if (!s.enabled) return;
-    const result = tabVerdicts.get(details.tabId) ?? (await evaluate(details.url));
+    // タブに残っている古い判定（リダイレクト前のURLのもの）は使わない。
+    // 使うと、正規ドメインから転送された先の詐欺ページを見逃す。
+    const result = await evaluate(details.url);
     await probePage(details.tabId, details.url, result);
   },
   { url: [{ schemes: ['http', 'https'] }] },
