@@ -73,7 +73,7 @@
 
       <section>
         <h2>機能フラグ（外部連携）</h2>
-        <p class="note warn-note">
+        <p class="note warn-note" id="providers-note">
           ここにある機能は<strong>すべて既定で無効</strong>です。有効にすると、ページを開いたときに
           外部サービスへの問い合わせが発生し、<strong>閲覧先が相手に伝わります</strong>。
           表示が遅くなることもあります。問い合わせるのは「URLだけで判定できなかったページ」に限り、
@@ -85,6 +85,43 @@
           <input type="text" id="doh-endpoint"
                  style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit" />
         </div>
+      </section>
+
+      <section>
+        <h2>Jev（外部の確率判定API）</h2>
+        <p class="note warn-note" id="jev-note">
+          これは<strong>実行時に閲覧先を外部へ送る唯一の機能</strong>です。既定では無効。
+          有効にすると、URLだけで判定できなかったページについて TypeSafe AI へ問い合わせます。
+          既定で送るのは<strong>ホスト名のみ</strong>です。
+        </p>
+        <div class="field">
+          <label for="jev-key">APIキー</label>
+          <input type="password" id="jev-key" autocomplete="off" placeholder="未設定"
+                 style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit" />
+          <button id="jev-key-save">保存</button>
+          <button id="jev-key-clear">削除</button>
+        </div>
+        <p class="note" id="jev-key-status">状態: 未確認</p>
+        <div class="field">
+          <label for="jev-model">モデル</label>
+          <input type="text" id="jev-model" placeholder="jev-latest"
+                 style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit" />
+        </div>
+        <div class="field">
+          <label for="jev-endpoint">エンドポイント</label>
+          <input type="text" id="jev-endpoint" placeholder="https://api.typesafe.ai/v1/systemone"
+                 style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit" />
+        </div>
+        <div class="field">
+          <label for="jev-full-url">パスとクエリも送る</label>
+          <input type="checkbox" id="jev-full-url" />
+          <span class="note">判定材料は増えますが、閲覧内容がより詳しく相手に伝わります。</span>
+        </div>
+        <p class="note">
+          APIキーはこの端末内（storage.local）にのみ保存し、Chromeの同期対象にしません。
+          保存後は画面に表示されません。有効化は上の「判定レイヤ」にある
+          「Jev による確率判定（外部API）」から行います。
+        </p>
       </section>
 
       <section>

@@ -103,6 +103,14 @@ function renderProviders(providers) {
   }
 }
 
+/** APIキーは値を受け取らず、設定済みかどうかだけを表示する。 */
+async function refreshSecretStatus() {
+  const res = await chrome.runtime.sendMessage({ type: 'secret-status' });
+  $('jev-key-status').textContent = res?.status?.jev
+    ? '状態: 設定済み（値は表示されません）'
+    : '状態: 未設定';
+}
+
 async function refreshBlocklistStatus() {
   const res = await chrome.runtime.sendMessage({ type: 'blocklist-status' });
   renderBlocklistStatus(res?.status);
@@ -134,6 +142,9 @@ function apply(settings) {
   $('use-blocklist').checked = Boolean(settings.useBlocklist);
   $('blocklist-url').value = settings.blocklistUrl ?? '';
   $('doh-endpoint').value = settings.dohEndpoint ?? '';
+  $('jev-model').value = settings.jevConfig?.model ?? '';
+  $('jev-endpoint').value = settings.jevConfig?.endpoint ?? '';
+  $('jev-full-url').checked = Boolean(settings.jevConfig?.sendFullUrl);
   $('allowlist').value = (settings.allowlist ?? []).join('\n');
   $('stat-checked').textContent = String(settings.stats?.checked ?? 0);
   $('stat-warned').textContent = String(settings.stats?.warned ?? 0);
@@ -158,6 +169,11 @@ async function main() {
       useBlocklist: $('use-blocklist').checked,
       blocklistUrl: $('blocklist-url').value.trim(),
       dohEndpoint: $('doh-endpoint').value.trim(),
+      jevConfig: {
+        model: $('jev-model').value.trim(),
+        endpoint: $('jev-endpoint').value.trim(),
+        sendFullUrl: $('jev-full-url').checked,
+      },
       allowlist: $('allowlist').value.split('\n').map((s) => s.trim().toLowerCase()).filter(Boolean),
     };
     const saved = await chrome.runtime.sendMessage({ type: 'set-settings', patch });
@@ -176,6 +192,22 @@ async function main() {
 
   const providerRes = await chrome.runtime.sendMessage({ type: 'get-providers' });
   renderProviders(providerRes?.providers ?? []);
+
+  await refreshSecretStatus();
+  $('jev-key-save').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const value = $('jev-key').value.trim();
+    if (!value) return;
+    await chrome.runtime.sendMessage({ type: 'set-secret', id: 'jev', value });
+    $('jev-key').value = '';   // 画面には残さない
+    await refreshSecretStatus();
+  });
+  $('jev-key-clear').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await chrome.runtime.sendMessage({ type: 'set-secret', id: 'jev', value: '' });
+    $('jev-key').value = '';
+    await refreshSecretStatus();
+  });
 
   await refreshBlocklistStatus();
   $('blocklist-update').addEventListener('click', async (e) => {

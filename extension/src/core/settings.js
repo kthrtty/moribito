@@ -15,6 +15,8 @@ export const DEFAULT_SETTINGS = {
   providerConfig: {},     // { [id]: { enabled, endpoint, apiKey } }
   detectorConfig: {},     // { [id]: { enabled } } 検出器ごとの差し替え
   dohEndpoint: DEFAULT_DOH_ENDPOINT,
+  // Jev（外部API）の設定。APIキーはここに置かない（sync はGoogleへ同期されるため）
+  jevConfig: { endpoint: '', model: 'jev-latest', sendFullUrl: false },
   stats: { checked: 0, warned: 0, blocked: 0 },
 };
 
@@ -92,6 +94,20 @@ export function sanitizeSettingsPatch(patch = {}) {
       config[id] = { enabled: Boolean(entry.enabled) };
     }
     out.detectorConfig = config;
+  }
+
+  if ('jevConfig' in patch && patch.jevConfig && typeof patch.jevConfig === 'object') {
+    const endpoint = String(patch.jevConfig.endpoint ?? '').trim();
+    const model = String(patch.jevConfig.model ?? '').trim();
+    out.jevConfig = {
+      endpoint: endpoint === '' || isSafeEndpoint(endpoint) ? endpoint : '',
+      model: /^[a-z0-9._-]{1,40}$/i.test(model) ? model : DEFAULT_SETTINGS.jevConfig.model,
+      sendFullUrl: Boolean(patch.jevConfig.sendFullUrl),
+    };
+  }
+  // APIキーは sync に保存しない。storage.local 側で扱う。
+  if ('apiKey' in patch || 'secrets' in patch) {
+    // 明示的に捨てる
   }
 
   if ('stats' in patch && patch.stats && typeof patch.stats === 'object') {

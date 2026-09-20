@@ -9,6 +9,7 @@ import { BRANDS, POPULAR_DOMAINS, brandOwning } from '../brands.js';
 import { evaluateRules, knownPhishingSignal } from '../rules.js';
 import { evaluatePageEvidence } from '../page-evidence.js';
 import { queryProviders, reputationSignals } from '../reputation.js';
+import { queryJev, jevWeight, jevStateFor } from '../jev.js';
 
 /** 利用者が明示的に許可したドメイン。何よりも優先する。 */
 export const allowlistDetector = {
@@ -113,6 +114,54 @@ export const reputationDetector = {
   },
 };
 
+/**
+ * Jev（TypeSafe AI）への問い合わせ。
+ * 実行時に閲覧先を外部へ送る唯一の層なので、既定で無効・グレーのときだけ呼ぶ。
+ */
+export const jevDetector = {
+  id: 'jev-remote',
+  label: 'Jev による確率判定（外部API）',
+  description: 'URLだけで決着しない場合に TypeSafe AI の Jev へ問い合わせます。'
+    + '有効にすると閲覧先が外部に伝わります。既定ではホスト名のみを送ります。',
+  stage: 'reputation',
+  cost: { network: 'domain', latency: 'medium' },
+  defaultEnabled: false,
+  configurable: true,
+  runWhen: (state) => state.grey,
+  async run(ctx) {
+    const config = ctx.jev;
+    if (!config?.apiKey) return null;
+
+    const cacheKey = `jev:${config.sendFullUrl ? ctx.url : ctx.features.host}`;
+    const cached = ctx.services?.cache?.get(cacheKey);
+    const answer = cached ?? await queryJev(ctx.url, config, {
+      fetchImpl: ctx.services?.fetchImpl,
+      timeoutMs: config.timeoutMs ?? 3000,
+    });
+    if (!answer) return null;
+    if (!cached) ctx.services?.cache?.set(cacheKey, answer);
+
+    if (answer.error) {
+      // 外部の不調で判定を止めない。理由だけ残す。
+      return { signals: [], note: `jev: ${answer.error}` };
+    }
+
+    const weight = jevWeight(answer);
+    if (weight <= 0) return null;
+    return {
+      signals: [{
+        id: 'jev-phishing',
+        weight,
+        title: '外部の確率判定モデルが危険と推定',
+        detail: `Jev はフィッシングである確率を ${Math.round(answer.probability * 100)}%`
+          + `（確信度 ${Math.round(answer.confidence * 100)}%）と推定しました。`
+          + `送信したのは ${config.sendFullUrl ? 'URL全体' : 'ホスト名のみ'} です。`,
+        from: 'jev',
+      }],
+    };
+  },
+};
+
 /** 表示コンテンツの検査。ctx.evidence があるときだけ動く。 */
 export const pageEvidenceDetector = {
   id: 'page-evidence',
@@ -201,6 +250,7 @@ export const DETECTOR_CATALOG = [
   knownGoodDetector,
   urlRulesDetector,
   reputationDetector,
+  jevDetector,
   pageEvidenceDetector,
   localModelDetector,
   localTextModelDetector,

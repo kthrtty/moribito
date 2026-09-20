@@ -17,6 +17,9 @@ const PROBE_PATH = 'src/content/page-probe.js';
 const WARNING_PATH = 'src/ui/warning.html';
 const CACHE_LIMIT = 500;
 
+const SECRET_IDS = new Set(['jev']);
+const MAX_SECRET_LENGTH = 500;
+
 const BLOCKLIST_PATH = 'data/blocklist.json';
 const BLOCKLIST_ALARM = 'blocklist-update';
 
@@ -186,6 +189,36 @@ function rememberVerdict(url, result) {
  * 判定に必要なものを1か所で組み立てる。
  * 検出器は chrome.* を知らないので、外部とのやり取りは services で注入する。
  */
+/**
+ * APIキーは storage.local に置く。
+ * storage.sync に置くとGoogleアカウント経由で同期されてしまうため。
+ * UIへは値を返さず、設定済みかどうかだけを返す。
+ */
+async function readSecret(id) {
+  if (!SECRET_IDS.has(id)) return '';
+  const stored = await chrome.storage.local.get('secrets');
+  return String(stored.secrets?.[id] ?? '');
+}
+
+async function writeSecret(id, value) {
+  if (!SECRET_IDS.has(id)) return false;
+  const text = String(value ?? '').trim().slice(0, MAX_SECRET_LENGTH);
+  const stored = await chrome.storage.local.get('secrets');
+  const secrets = { ...(stored.secrets ?? {}) };
+  if (text) secrets[id] = text;
+  else delete secrets[id];
+  await chrome.storage.local.set({ secrets });
+  verdictCache.clear();
+  ttlCache.clear();
+  return true;
+}
+
+async function secretStatus() {
+  const stored = await chrome.storage.local.get('secrets');
+  const secrets = stored.secrets ?? {};
+  return Object.fromEntries([...SECRET_IDS].map((id) => [id, Boolean(secrets[id])]));
+}
+
 async function buildContext(url, s, extra = {}) {
   const features = extractFeatures(url);
   const providers = resolveProviders(s);
@@ -207,6 +240,7 @@ async function buildContext(url, s, extra = {}) {
     allowlist: new Set(s.allowlist),
     providers,
     dohEndpoint: s.dohEndpoint,
+    jev: { ...(s.jevConfig ?? {}), apiKey: await readSecret('jev') },
     services: {
       blocklist: await loadBlocklist(),
       cache: cacheService,
@@ -449,6 +483,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await applyPageEvidence(tabId, url, message.evidence);
         }
         sendResponse({ ok: true });
+        break;
+      }
+      case 'set-secret': {
+        const ok = await writeSecret(message.id, message.value);
+        sendResponse({ ok, status: await secretStatus() });
+        break;
+      }
+      case 'secret-status': {
+        // 値そのものは決して返さない
+        sendResponse({ ok: true, status: await secretStatus() });
         break;
       }
       case 'get-detectors': {

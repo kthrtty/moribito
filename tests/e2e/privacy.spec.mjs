@@ -35,8 +35,9 @@ test('外部連携の機能フラグは既定ですべて無効', async ({ conte
     await expect(checkboxes.nth(i)).not.toBeChecked();
   }
   // 影響の説明が画面に出ていること
-  await expect(page.locator('.warn-note')).toContainText('既定で無効');
-  await expect(page.locator('.warn-note')).toContainText('閲覧先が相手に伝わります');
+  await expect(page.locator('#providers-note')).toContainText('既定で無効');
+  await expect(page.locator('#providers-note')).toContainText('閲覧先が相手に伝わります');
+  await expect(page.locator('#jev-note')).toContainText('実行時に閲覧先を外部へ送る唯一の機能');
 });
 
 test('機能フラグをONにすると設定に保存される', async ({ context, extensionId, serviceWorker }) => {
@@ -103,4 +104,47 @@ test('設定画面から平文URLを入れても保存されない', async ({ co
     .poll(() => serviceWorker.evaluate(
       () => chrome.storage.sync.get({ blocklistUrl: null }).then((s) => s.blocklistUrl)))
     .toBe('');
+});
+
+test('Jevは既定で無効で、APIキーは画面に返らない', async ({ context, extensionId, serviceWorker }) => {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/src/ui/options.html`);
+  await expect(page.locator('#block')).not.toHaveValue('');
+
+  // 既定は無効
+  await expect(page.locator('#detector-jev-remote')).not.toBeChecked();
+  await expect(page.locator('#jev-key-status')).toHaveText(/未設定/);
+
+  // 保存しても、画面には値が残らず、状態だけが返る
+  await page.locator('#jev-key').fill('sk-test-secret-value');
+  await page.locator('#jev-key-save').click();
+  await expect(page.locator('#jev-key-status')).toHaveText(/設定済み/);
+  await expect(page.locator('#jev-key')).toHaveValue('');
+
+  // 問い合わせても値そのものは返ってこない
+  const status = await page.evaluate(() => chrome.runtime.sendMessage({ type: 'secret-status' }));
+  expect(status.status.jev).toBe(true);
+  expect(JSON.stringify(status)).not.toContain('sk-test-secret-value');
+
+  // storage.sync 側には保存されない（Googleへ同期させない）
+  const synced = await serviceWorker.evaluate(() => chrome.storage.sync.get(null));
+  expect(JSON.stringify(synced)).not.toContain('sk-test-secret-value');
+
+  // 削除できる
+  await page.locator('#jev-key-clear').click();
+  await expect(page.locator('#jev-key-status')).toHaveText(/未設定/);
+});
+
+test('Jevを有効にしていなければ外部へ出ない', async ({ context, serviceWorker }) => {
+  const requested = [];
+  context.on('request', (req) => requested.push(req.url()));
+
+  const page = await context.newPage();
+  // グレー判定になるURL（Jevが有効なら問い合わせが走る位置）
+  await page.goto('https://aeon-card.info/update', { waitUntil: 'commit' }).catch(() => {});
+  await page.waitForTimeout(1500);
+
+  const external = requested.filter((url) => /^https?:\/\//.test(url))
+    .filter((url) => !url.startsWith('https://aeon-card.info/'));
+  expect(external, `外部への通信が発生しました:\n${external.join('\n')}`).toEqual([]);
 });

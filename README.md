@@ -12,7 +12,9 @@ Being explicit up front, because it is easy to assume otherwise:
 
 - **No LLM is used.** No inference runs at all.
 - **No machine-learning model is bundled.** `extension/model/` contains only a README.
-- **No hosted model API is called at runtime.** Zero network requests are made to judge a page.
+- **No hosted model is called unless you turn one on.** One optional layer (Jev) can query an
+  external API at runtime; it is **off by default**, needs an API key, and sends only the hostname
+  unless you choose otherwise. With default settings the extension makes zero network requests to judge a page.
 
 Everything it currently does is deterministic:
 
@@ -92,6 +94,7 @@ Each layer is a **detector** that can be added, removed or replaced. The pipelin
 | `known-good` — official / popular / LAN cutoff | safe | none | on |
 | `url-rules` — URL structure rules | url | none | on |
 | `reputation` — external reputation lookup | reputation | **yes** | **off** |
+| `jev-remote` — probability model via external API | reputation | **yes** | **off** |
 | `page-evidence` — rendered page inspection | content | none | on |
 | `local-model` — local URL classifier | model | none | **off** (no model bundled) |
 | `local-text-model` — local text model | model | none | **off** (no model bundled) |
@@ -198,11 +201,13 @@ Scores combine with **noisy-OR**: weak evidence accumulates but never exceeds 1.
 **At runtime the only network request this extension makes is fetching the known-phishing list
 from an update URL you configure.** It is off by default.
 
-| When | Destination | What is sent |
-|---|---|---|
-| Opening a page | **nothing** | — |
-| List update (every 12h) | only the URL you configured | nothing (GET only) |
-| Building a list (development) | the feeds you name | nothing |
+| When | Destination | What is sent | Default |
+|---|---|---|---|
+| Opening a page | **nothing** | — | — |
+| Grey-band URL, if Jev is enabled | TypeSafe AI | the hostname (or the URL, if you opt in) | **off** |
+| Grey-band URL, if a reputation provider is enabled | the endpoint you configured | depends on the provider kind | **off** |
+| List update (every 12h) | only the URL you configured | nothing (GET only) | off (no URL set) |
+| Building a list (development) | the feeds you name | nothing | manual |
 
 ### Feeds that can be compiled into the list
 
@@ -236,6 +241,20 @@ A vendor-neutral provider layer: the endpoint and the way to read the response a
 
 Only pages that the URL rules could not settle are looked up, results are cached per domain for
 6 hours, and a failing provider never blocks a verdict (2.5s timeout with `AbortController`).
+
+### Jev (TypeSafe AI) — the one runtime API call, off by default
+
+When enabled, grey-band URLs are sent to Jev's `POST /v1/systemone` as a typed `choice` question,
+and the returned probability becomes one more signal.
+
+| | |
+|---|---|
+| What is sent | **the hostname only** by default; path and query only if you opt in |
+| When | only URLs the rules could not settle — not every page |
+| Weight | capped at 0.8, so it never blocks on its own; combined with the grey score it can |
+| API key | stored in `chrome.storage.local`, **never** in `storage.sync` (which syncs to Google), and never returned to the UI |
+| Failure | a timeout, 401/422/429/529 or a malformed response leaves the rule verdict untouched |
+| Caching | per hostname, 6 hours |
 
 ### Certificates
 
@@ -444,6 +463,7 @@ npm test
 | `known-good` 公式・著名ドメインの打ち切り | safe | なし | 有効 |
 | `url-rules` URL構造ルール | url | なし | 有効 |
 | `reputation` 外部リピュテーション照会 | reputation | **あり** | **無効** |
+| `jev-remote` Jevによる確率判定（外部API） | reputation | **あり** | **無効** |
 | `page-evidence` 表示コンテンツ検査 | content | なし | 有効 |
 | `local-model` ローカル分類器（URL） | model | なし | **無効**（モデル未同梱） |
 | `local-text-model` ローカルLLM/文面判定 | model | なし | **無効**（モデル未同梱） |
@@ -551,6 +571,8 @@ tests/               ユニット(Node) + E2E(Playwright/ヘッドレスChromium
 | いつ | 通信先 | 送るもの | 既定 |
 |---|---|---|---|
 | ページを開くたび | **なし** | — | — |
+| グレーのURL（Jev有効時） | TypeSafe AI | ホスト名（設定によりURL全体） | **既定で無効** |
+| グレーのURL（リピュテーション有効時） | 設定したエンドポイント | 種別による | **既定で無効** |
 | 既知リストの更新（12時間ごと） | 設定画面で指定したURLのみ | なし（GETのみ） | **未設定＝通信しない** |
 | 開発時のリスト生成 | 指定したフィード | なし | 手動実行 |
 
@@ -612,27 +634,43 @@ Certificate Transparency ログから「ブランド語を含む新規証明書�
 
 ## 5. Jev と LLM を、今の実装でどう使っているか
 
-### 結論: **どちらも使っていません。現在の判定は100%が決定的なロジックです。**
+### 結論: **既定では使いません。有効にしたときだけ Jev を呼びます。**
 
 | 技術 | 現状 | 実体 |
 |---|---|---|
-| **Jev（ホスト型の確率判定モデル）** | **未使用**。実行時に一切呼びません | `tools/train/label_with_jev.mjs` という**未実行のひな形**があるだけ |
+| **Jev（ホスト型の確率判定モデル）** | **既定で無効**。APIキーを設定して有効化したときだけ、グレーのURLについて問い合わせます | `jev-remote` 検出器（`src/core/jev.js`）。別途、開発時のラベル付け用に `tools/train/label_with_jev.mjs` のひな形もあります |
 | **LLM（ローカル・リモートとも）** | **未使用**。推論は1回も走りません | `local-text-model` という**差し込み口**のみ。既定で無効 |
 | **機械学習モデル全般（ONNX）** | **未使用**。モデルを同梱していません | `local-model` 検出器と `src/worker/model.js` の差し込み口のみ。既定で無効 |
 
-いま実際に判定しているのは、次の3つだけです。
+**既定の設定で**実際に判定しているのは、次の3つだけです。
 
 1. URL文字列に対する決定的なルール（Unicode正規化・PSL・編集距離など）
 2. 配布済みハッシュ表との突き合わせ
 3. DOMから取った属性・語彙の照合
 
+機械学習モデルの推論は、既定では1回も走りません。
+
 設定画面の「ローカル分類器」の状態表示が **「モデル未配置（ルールのみ）」** と出るのは、
 この状態を正しく示しています。
 
-### なぜ実行時に使わないのか
+### Jev を有効にすると何が起きるか
+
+| | |
+|---|---|
+| 送るもの | **既定はホスト名のみ**。パスとクエリを送るかは設定で選ぶ |
+| いつ | **URLだけで決着しなかったページのみ**。全ページではない |
+| 重み | 上限0.8。単独ではブロックに届かず、グレーのスコアと合算して初めて到達する |
+| APIキー | `chrome.storage.local` に保存。**`storage.sync` には置かない**（Googleへ同期されるため）。UIへも値を返さない |
+| 失敗時 | タイムアウト・401/422/429/529・想定外の応答のいずれでも、ルールの判定をそのまま返す |
+| キャッシュ | ホスト単位で6時間 |
+
+有効にすると**閲覧先が TypeSafe AI に伝わります**。既定で無効にしているのはそのためで、
+設定画面にも明示しています。
+
+### なぜ既定では使わないのか
 
 閲覧中のURLやページ内容を外部のモデルAPIに送ると、**実質的に閲覧履歴を渡すこと**になります。
-常時動く拡張でそれをやる設計は採りませんでした。
+常時動く拡張の既定動作としては採りませんでした。
 
 ### では Jev は何のために置いてあるのか
 
