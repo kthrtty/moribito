@@ -1,0 +1,36 @@
+body { background: var(--danger-bg); }
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 20px 64px;
+}
+
+.shield { font-size: 56px; line-height: 1; }
+h1 { font-size: 26px; margin-top: 12px; }
+.lead { color: var(--fg); margin: 0 0 22px; }
+
+.url-card { background: var(--bg); }
+.row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 12px;
+  padding: 6px 0;
+  align-items: baseline;
+}
+.row + .row { border-top: 1px solid var(--line); }
+/* display:grid が hidden 属性を打ち消してしまうので明示的に戻す */
+.row[hidden] { display: none; }
+.label { color: var(--muted); font-size: 12px; }
+.host { font-size: 15px; font-weight: 700; }
+.full { color: var(--muted); max-height: 5.2em; overflow: auto; display: block; }
+.score { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.reasons-title { font-size: 15px; margin: 22px 0 8px; }
+.actions { display: flex; gap: 10px; margin: 22px 0 10px; flex-wrap: wrap; }
+.advanced { margin-top: 10px; }
+.advanced summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.advanced > *:not(summary) { margin-top: 10px; }
+.checkbox { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.small { font-size: 12.5px; }
+.foot { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 12px; }

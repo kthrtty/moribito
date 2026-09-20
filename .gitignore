@@ -1,0 +1,9 @@
+node_modules/
+test-results/
+playwright-report/
+/data/
+extension/model/*.onnx
+extension/model/meta.json
+extension/vendor/
+.venv/
+.DS_Store

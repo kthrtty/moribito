@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>フィッシングの疑い — Moribito</title>
+    <link rel="stylesheet" href="common.css" />
+    <link rel="stylesheet" href="warning.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="shield" aria-hidden="true">⚠️</div>
+      <h1>このサイトを開くのは危険かもしれません</h1>
+      <p class="lead">
+        URLの構造が、正規サイトになりすますフィッシングの典型的な特徴と一致しました。
+        ログイン情報・カード番号・認証コードは絶対に入力しないでください。
+      </p>
+
+      <section class="card url-card">
+        <div class="row">
+          <span class="label">接続先</span>
+          <code id="host" class="mono host"></code>
+        </div>
+        <div class="row" id="unicode-row" hidden>
+          <span class="label">表示名</span>
+          <code id="host-unicode" class="mono"></code>
+        </div>
+        <div class="row">
+          <span class="label">URL全体</span>
+          <code id="full-url" class="mono full"></code>
+        </div>
+        <div class="row">
+          <span class="label">危険度</span>
+          <span><span id="score" class="score"></span> <span id="verdict" class="badge block"></span></span>
+        </div>
+      </section>
+
+      <h2 class="reasons-title">検出された特徴</h2>
+      <section class="card" id="signals"></section>
+
+      <div class="actions">
+        <button id="back" class="primary">安全な場所に戻る</button>
+        <button id="details-toggle">詳細を表示</button>
+      </div>
+
+      <details id="advanced" class="advanced">
+        <summary>危険を理解した上で続行する</summary>
+        <p class="muted small">
+          続行すると、この判定を回避してサイトを開きます。心当たりのない通知やSMSから来た場合は、
+          続行せずに公式アプリや、自分でブックマークしたURLから確認してください。
+        </p>
+        <label class="checkbox">
+          <input type="checkbox" id="permanent" />
+          このドメインを今後ずっと許可する
+        </label>
+        <button id="proceed" class="danger-outline">危険を承知で続行する</button>
+      </details>
+
+      <footer class="foot muted small">
+        Moribito はURLの構造だけをローカルで判定しています。閲覧履歴を外部に送信しません。
+      </footer>
+    </main>
+    <script type="module" src="warning.js"></script>
+  </body>
+</html>

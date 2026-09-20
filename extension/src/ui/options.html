@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Moribito の設定</title>
+    <link rel="stylesheet" href="common.css" />
+    <style>
+      .wrap { max-width: 660px; margin: 0 auto; padding: 32px 20px 64px; }
+      section { margin-bottom: 28px; }
+      h2 { font-size: 15px; margin-bottom: 10px; }
+      .field { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+      .field label { flex: 0 0 190px; font-size: 13px; }
+      .field input[type="range"] { flex: 1; }
+      .field output { width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+      textarea { width: 100%; min-height: 110px; border-radius: 8px; border: 1px solid var(--line);
+        background: var(--bg); color: var(--fg); padding: 8px; font-family: ui-monospace, monospace; }
+      .stats { display: flex; gap: 18px; }
+      .stat b { display: block; font-size: 22px; }
+      .note { font-size: 12.5px; color: var(--muted); }
+      .warn-note { background: var(--warn-bg); color: var(--warn); padding: 10px 12px; border-radius: 8px; }
+      .provider { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+      .provider header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      .provider header label { font-weight: 600; flex: 1; }
+      .provider input[type="text"] { width: 100%; padding: 6px 8px; border-radius: 8px;
+        border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; }
+      .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--card); color: var(--muted); }
+      .tag.cost-2, .tag.cost-3 { background: var(--warn-bg); color: var(--warn); }
+      .tag.perf-high { background: var(--danger-bg); color: var(--danger); }
+      .detector { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0;
+        border-top: 1px dashed var(--line); }
+      .detector:first-child { border-top: none; }
+      .detector .body { flex: 1; }
+      .detector .name { font-weight: 600; font-size: 13px; }
+      .detector .desc { font-size: 12px; color: var(--muted); }
+      .stage { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+      .actions { display: flex; gap: 10px; }
+      #saved { color: var(--ok); font-size: 13px; opacity: 0; transition: opacity .2s; }
+      #saved.show { opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Moribito の設定</h1>
+      <p class="note">
+        判定はすべてこの端末の中で行われます。閲覧中のURLが外部サーバーへ送られることはありません。
+      </p>
+
+      <section>
+        <h2>判定の強さ</h2>
+        <div class="field">
+          <label for="block">ブロックするしきい値</label>
+          <input type="range" id="block" min="0.5" max="0.99" step="0.01" />
+          <output id="block-out"></output>
+        </div>
+        <div class="field">
+          <label for="warn">注意表示のしきい値</label>
+          <input type="range" id="warn" min="0.2" max="0.9" step="0.01" />
+          <output id="warn-out"></output>
+        </div>
+        <p class="note">
+          しきい値を下げるほど検出は増えますが、正規サイトを誤ってブロックする可能性も上がります。
+        </p>
+      </section>
+
+      <section>
+        <h2>判定レイヤ</h2>
+        <p class="note">
+          判定は差し替え可能な検出器の組み合わせで動いています。個別に無効化できます。
+        </p>
+        <div id="detectors"></div>
+      </section>
+
+      <section>
+        <h2>機能フラグ（外部連携）</h2>
+        <p class="note warn-note">
+          ここにある機能は<strong>すべて既定で無効</strong>です。有効にすると、ページを開いたときに
+          外部サービスへの問い合わせが発生し、<strong>閲覧先が相手に伝わります</strong>。
+          表示が遅くなることもあります。問い合わせるのは「URLだけで判定できなかったページ」に限り、
+          結果は6時間キャッシュします。
+        </p>
+        <div id="providers"></div>
+        <div class="field">
+          <label for="doh-endpoint">DoHリゾルバ（IP評価で使用）</label>
+          <input type="text" id="doh-endpoint"
+                 style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit" />
+        </div>
+      </section>
+
+      <section>
+        <h2>既知フィッシングリスト</h2>
+        <div class="field">
+          <label for="use-blocklist">報告済みリストと照合する</label>
+          <input type="checkbox" id="use-blocklist" />
+          <span class="note" id="blocklist-status">状態: 未確認</span>
+        </div>
+        <div class="field">
+          <label for="blocklist-url">更新の取得元URL</label>
+          <input type="text" id="blocklist-url" placeholder="https://example.org/blocklist.json"
+                 style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit" />
+          <button id="blocklist-update">今すぐ更新</button>
+        </div>
+        <p class="note">
+          照合はハッシュ同士で端末内だけで行います。閲覧中のURLが外部へ送られることはありません。
+          通信が発生するのは、ここで指定した取得元からリストを取得するときだけです
+          （未指定なら同梱分のみを使い、一切通信しません）。
+          フィッシングURLは短命なので、定期的な更新が前提です。
+        </p>
+      </section>
+
+      <section>
+        <h2>表示内容の検査</h2>
+        <div class="field">
+          <label for="inspect-pages">URLで決着しないページを調べる</label>
+          <input type="checkbox" id="inspect-pages" />
+        </div>
+        <p class="note">
+          URL判定でグレーになったページに限り、入力欄と名乗っているブランドを調べます。
+          正規ドメインが乗っ取られてフィッシングページが置かれた場合は、これがないと検出できません。
+          調べた内容は端末内で処理し、外部には送信しません。
+        </p>
+      </section>
+
+      <section>
+        <h2>ローカル分類器</h2>
+        <div class="field">
+          <label for="use-model">グレーゾーンで使う</label>
+          <input type="checkbox" id="use-model" />
+          <span class="note" id="model-state">状態: 未確認</span>
+        </div>
+        <p class="note">
+          extension/model/ に ONNX モデルを置いた場合のみ有効になります。
+          モデルが無いときはルールのみで判定します（動作に支障はありません）。
+        </p>
+      </section>
+
+      <section>
+        <h2>許可リスト（1行に1ドメイン）</h2>
+        <textarea id="allowlist" spellcheck="false" placeholder="example.co.jp"></textarea>
+      </section>
+
+      <section>
+        <h2>これまでの判定</h2>
+        <div class="stats">
+          <div class="stat"><b id="stat-checked">0</b><span class="note">判定した遷移</span></div>
+          <div class="stat"><b id="stat-warned">0</b><span class="note">注意</span></div>
+          <div class="stat"><b id="stat-blocked">0</b><span class="note">ブロック</span></div>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button class="primary" id="save">保存</button>
+        <button id="reset">初期設定に戻す</button>
+        <span id="saved">保存しました</span>
+      </div>
+    </div>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,101 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1b1b1f;
+  --muted: #5c5f66;
+  --line: #e2e4e9;
+  --card: #f7f8fa;
+  --danger: #c81e1e;
+  --danger-bg: #fdeaea;
+  --warn: #b45309;
+  --warn-bg: #fdf3e3;
+  --ok: #157347;
+  --ok-bg: #e9f5ee;
+  --accent: #1a56db;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c;
+    --fg: #e8e9ec;
+    --muted: #a0a4ad;
+    --line: #2e3038;
+    --card: #202229;
+    --danger: #ff6b6b;
+    --danger-bg: #3a1f22;
+    --warn: #f0b429;
+    --warn-bg: #362b17;
+    --ok: #4ade80;
+    --ok-bg: #16281e;
+    --accent: #7aa2f7;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP",
+    "Yu Gothic UI", Meiryo, sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+h1, h2, h3 { line-height: 1.35; margin: 0 0 8px; }
+
+code, .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  word-break: break-all;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.muted { color: var(--muted); }
+
+button {
+  font: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--fg);
+  padding: 8px 14px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger-outline { border-color: var(--danger); color: var(--danger); }
+
+.signal {
+  display: flex;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--line);
+}
+.signal:first-child { border-top: none; }
+.signal .bar {
+  flex: 0 0 4px;
+  border-radius: 2px;
+  background: var(--danger);
+  opacity: 0.85;
+}
+.signal .title { font-weight: 600; }
+.signal .detail { color: var(--muted); font-size: 13px; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.badge.block { background: var(--danger-bg); color: var(--danger); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.allow { background: var(--ok-bg); color: var(--ok); }

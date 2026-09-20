@@ -1,0 +1,20 @@
+{
+  "name": "moribito",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "URLベースでフィッシングサイトを判定するChrome拡張（ルールエンジン + ローカル軽量分類器）",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "node --test \"tests/unit/*.test.mjs\"",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "icons": "node tools/make-icons.mjs",
+    "psl": "node tools/build-psl.mjs",
+    "confusables": "node tools/build-confusables.mjs",
+    "eval": "node tools/evaluate.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
