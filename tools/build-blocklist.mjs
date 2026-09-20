@@ -28,6 +28,10 @@ const opt = (name, fallback) => {
   return hit ? hit.slice(name.length + 3) : fallback;
 };
 const sources = args.filter((a) => a.startsWith('--source=')).map((a) => a.slice(9));
+// マルウェア配布URLは別表に入れる。警告文が「フィッシング」では実態と合わないため。
+const malwareSources = args.filter((a) => a.startsWith('--malware-source=')).map((a) => a.slice(17));
+// IP直打ちのURL（ボットネットの配布サーバ等）はブラウザで踏むことがまずないので既定で除く
+const keepIpHosts = args.includes('--keep-ip-hosts');
 const out = resolve(ROOT, opt('out', 'extension/data/blocklist.json'));
 const ttlDays = Number(opt('ttl-days', 14));
 const hostMin = Number(opt('host-min', 2));    // 同一ホストでこの数以上ならホスト単位で登録
@@ -35,7 +39,7 @@ const domainMin = Number(opt('domain-min', 5)); // 同一登録ドメインで�
 // ドメインごと潰すのは巻き添えが大きいので、明示的に指定されたときだけ行う
 const domainLevel = args.includes('--domain-level');
 
-if (!sources.length) {
+if (!sources.length && !malwareSources.length) {
   console.error('少なくとも1つ --source=<形式>:<URLまたはパス> を指定してください。');
   console.error('例: --source=openphish:https://openphish.com/feed.txt');
   process.exit(1);
@@ -70,10 +74,21 @@ function parse(format, text) {
     case 'urlhaus': {
       const rows = lines.filter((l) => l && !l.startsWith('#'));
       if (!rows.length) return [];
-      const header = splitCsv(rows[0]).map((h) => h.replace(/^"|"$/g, '').trim().toLowerCase());
+
+      // URLhaus は見出し行を「# id,dateadded,url,...」とコメントの中に置く。
+      // コメントを落としてから1行目を見出しとみなすと、最初のデータ行を失う。
+      const commented = lines
+        .filter((l) => l.startsWith('#') && l.toLowerCase().includes('url'))
+        .map((l) => l.replace(/^#\s*/, ''))
+        .find((l) => splitCsv(l).map((h) => h.trim().toLowerCase()).includes('url'));
+
+      const headerLine = commented ?? rows[0];
+      const header = splitCsv(headerLine).map((h) => h.replace(/^"|"$/g, '').trim().toLowerCase());
       const index = header.indexOf('url');
       if (index < 0) throw new Error(`${format}: url列が見つかりません (${header.join(',')})`);
-      return rows.slice(1).map((row) => splitCsv(row)[index]?.replace(/^"|"$/g, '').trim()).filter(Boolean);
+
+      const body = commented ? rows : rows.slice(1);
+      return body.map((row) => splitCsv(row)[index]?.replace(/^"|"$/g, '').trim()).filter(Boolean);
     }
     default:
       throw new Error(`未知の形式: ${format}`);
@@ -122,41 +137,49 @@ function safeToWiden(info) {
   return true;
 }
 
-const urlKeys = new Set();
-const perHost = new Map();
-const perDomain = new Map();
+const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 const report = [];
 
-for (const spec of sources) {
-  const { format, location, urls } = await readSource(spec);
-  let accepted = 0;
-  for (const raw of urls) {
-    const c = canonical(raw);
-    if (!c) continue;
-    accepted++;
-    urlKeys.add(`${c.host}${c.path}${c.query}`);
-    if (c.query) urlKeys.add(`${c.host}${c.path}`); // クエリ違いにも当てる
-    if (!safeToWiden(c.info)) continue;
-    if (!perHost.has(c.host)) perHost.set(c.host, new Set());
-    perHost.get(c.host).add(c.path || '/');
-    const domain = c.info.registrable;
-    if (!perDomain.has(domain)) perDomain.set(domain, new Set());
-    perDomain.get(domain).add(c.host + c.path);
+/** 1つの種別ぶんの集計を作る。 */
+async function collect(specs, threat) {
+  const urlKeys = new Set();
+  const perHost = new Map();
+  const perDomain = new Map();
+
+  for (const spec of specs) {
+    const { format, location, urls } = await readSource(spec);
+    let accepted = 0;
+    let skippedIp = 0;
+    for (const raw of urls) {
+      const c = canonical(raw);
+      if (!c) continue;
+      if (!keepIpHosts && (IPV4.test(c.host) || c.host.startsWith('['))) { skippedIp++; continue; }
+      accepted++;
+      urlKeys.add(`${c.host}${c.path}${c.query}`);
+      if (c.query) urlKeys.add(`${c.host}${c.path}`); // クエリ違いにも当てる
+      if (!safeToWiden(c.info)) continue;
+      if (!perHost.has(c.host)) perHost.set(c.host, new Set());
+      perHost.get(c.host).add(c.path || '/');
+      const domain = c.info.registrable;
+      if (!perDomain.has(domain)) perDomain.set(domain, new Set());
+      perDomain.get(domain).add(c.host + c.path);
+    }
+    report.push({ format, location, threat, total: urls.length, accepted, skippedIp });
+    console.log(`[${threat}] ${format} ${location}: ${accepted}/${urls.length} 件を取り込み`
+      + (skippedIp ? `（IP直打ち ${skippedIp} 件を除外）` : ''));
   }
-  report.push({ format, location, total: urls.length, accepted });
-  console.log(`${format} ${location}: ${accepted}/${urls.length} 件を取り込み`);
+
+  const hostKeys = new Set();
+  for (const [host, paths] of perHost) if (paths.size >= hostMin) hostKeys.add(host);
+  const domainKeys = new Set();
+  if (domainLevel) {
+    for (const [domain, entries] of perDomain) if (entries.size >= domainMin) domainKeys.add(domain);
+  }
+  return { urlKeys, hostKeys, domainKeys };
 }
 
-const hostKeys = new Set();
-for (const [host, paths] of perHost) {
-  if (paths.size >= hostMin) hostKeys.add(host);
-}
-const domainKeys = new Set();
-if (domainLevel) {
-  for (const [domain, entries] of perDomain) {
-    if (entries.size >= domainMin) domainKeys.add(domain);
-  }
-}
+const phishing = await collect(sources, 'phishing');
+const malware = malwareSources.length ? await collect(malwareSources, 'malware') : null;
 
 async function tableOf(keys) {
   const entries = [];
@@ -172,17 +195,29 @@ const artifact = {
   expiresAt: expiresAt.toISOString(),
   algo: 'sha256-64',
   sources: report,
-  counts: { url: urlKeys.size, host: hostKeys.size, domain: domainKeys.size },
-  tables: {
-    url: await tableOf(urlKeys),
-    host: await tableOf(hostKeys),
-    domain: await tableOf(domainKeys),
+  counts: {
+    url: phishing.urlKeys.size, host: phishing.hostKeys.size, domain: phishing.domainKeys.size,
+    malwareUrl: malware?.urlKeys.size ?? 0, malwareHost: malware?.hostKeys.size ?? 0,
   },
+  tables: {
+    url: await tableOf(phishing.urlKeys),
+    host: await tableOf(phishing.hostKeys),
+    domain: await tableOf(phishing.domainKeys),
+  },
+  ...(malware ? {
+    malwareTables: {
+      url: await tableOf(malware.urlKeys),
+      host: await tableOf(malware.hostKeys),
+      domain: await tableOf(malware.domainKeys),
+    },
+  } : {}),
 };
 
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify(artifact));
 const sizeKb = (JSON.stringify(artifact).length / 1024).toFixed(0);
 console.log(`\n${out} を書き出しました`);
-console.log(`  URL ${urlKeys.size} / ホスト ${hostKeys.size} / ドメイン ${domainKeys.size}  (${sizeKb} KB)`);
+console.log(`  フィッシング: URL ${phishing.urlKeys.size} / ホスト ${phishing.hostKeys.size} / ドメイン ${phishing.domainKeys.size}`);
+if (malware) console.log(`  マルウェア:   URL ${malware.urlKeys.size} / ホスト ${malware.hostKeys.size} / ドメイン ${malware.domainKeys.size}`);
+console.log(`  成果物サイズ: ${sizeKb} KB`);
 console.log(`  有効期限: ${expiresAt.toISOString().slice(0, 10)}（フィッシングURLは短命なので定期更新すること）`);

@@ -1,6 +1,19 @@
 /** 実際のChromeに拡張をロードして、判定エンジンが動くことを確かめる。 */
 import { test, expect, evaluateInExtension } from './fixtures.mjs';
 import { BENIGN, PHISHING } from '../fixtures/urls.mjs';
+import { hashKey, encodeTable, bytesToBase64 } from '../../extension/src/core/blocklist.js';
+
+/** テスト用の成果物を組み立てる（実フィードは使わない）。 */
+async function buildArtifact(phishingKeys = [], malwareKeys = []) {
+  const table = async (keys) => bytesToBase64(encodeTable(await Promise.all(keys.map(hashKey))));
+  return {
+    version: 1, algo: 'sha256-64',
+    generatedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 86400_000).toISOString(),
+    tables: { url: await table(phishingKeys), host: '', domain: '' },
+    malwareTables: { url: await table(malwareKeys), host: '', domain: '' },
+  };
+}
 
 test('拡張がロードされ service worker が起動する', async ({ serviceWorker, extensionId }) => {
   expect(extensionId).toMatch(/^[a-p]{32}$/);
@@ -54,4 +67,53 @@ test('モデル未配置でもワーカーは落ちずルールのみで動く',
   const state = await serviceWorker.evaluate(() =>
     globalThis.moribito.askWorker({ type: 'warmup', useModel: true }));
   expect(state?.modelState).toBe('unavailable');
+});
+
+test('配布された既知リストに一致すれば、他に手がかりが無くてもブロックする', async ({ context, serviceWorker }) => {
+  const target = 'https://ordinary-looking-site.example/account/page';
+  // ルールだけでは何も出ないURLであることを先に確認する
+  const urlOnly = await serviceWorker.evaluate(
+    (u) => globalThis.moribito.analyzeUrl(u).score, target);
+  expect(urlOnly).toBe(0);
+
+  // 更新経路と同じ場所（storage.local）に成果物を入れる
+  const artifact = await buildArtifact(['ordinary-looking-site.example/account/page']);
+  await serviceWorker.evaluate(async (a) => {
+    await chrome.storage.local.set({ blocklist: a });
+    globalThis.moribito.resetBlocklistCache();
+  }, artifact);
+
+  const page = await context.newPage();
+  await page.goto(target, { waitUntil: 'commit' }).catch(() => {});
+  await page.waitForURL(/\/src\/ui\/warning\.html\?token=/, { timeout: 15_000 });
+  await expect(page.locator('#signals .signal .title').first())
+    .toContainText('既知のフィッシングサイト');
+});
+
+test('マルウェア配布として報告されたURLは、その旨を表示する', async ({ context, serviceWorker }) => {
+  const target = 'https://download-host.example/setup.msi';
+  const artifact = await buildArtifact([], ['download-host.example/setup.msi']);
+  await serviceWorker.evaluate(async (a) => {
+    await chrome.storage.local.set({ blocklist: a });
+    globalThis.moribito.resetBlocklistCache();
+  }, artifact);
+
+  const page = await context.newPage();
+  await page.goto(target, { waitUntil: 'commit' }).catch(() => {});
+  await page.waitForURL(/\/src\/ui\/warning\.html\?token=/, { timeout: 15_000 });
+  await expect(page.locator('#signals .signal .title').first())
+    .toContainText('マルウェア配布サイト');
+});
+
+test('リストに無いURLは、リストがあっても素通しする', async ({ context, serviceWorker }) => {
+  const artifact = await buildArtifact(['something-else.example/x']);
+  await serviceWorker.evaluate(async (a) => {
+    await chrome.storage.local.set({ blocklist: a });
+    globalThis.moribito.resetBlocklistCache();
+  }, artifact);
+
+  const page = await context.newPage();
+  await page.goto('https://ordinary-looking-site.example/account/page', { waitUntil: 'commit' }).catch(() => {});
+  await page.waitForTimeout(1500);
+  await expect(page).toHaveURL('https://ordinary-looking-site.example/account/page');
 });

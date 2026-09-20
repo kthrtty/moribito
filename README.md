@@ -233,8 +233,18 @@ take down the whole site.
 node tools/build-blocklist.mjs \
   --source=openphish:https://openphish.com/feed.txt \
   --source=plain:./data/private-feed.txt \
-  --out=extension/data/blocklist.json --ttl-days=14
+  --malware-source=urlhaus:https://urlhaus.abuse.ch/downloads/csv_online/ \
+  --out=extension/data/blocklist.json --ttl-days=7
 ```
+
+Feeds are also tagged by threat. `--malware-source=` puts entries in a separate table so the
+warning says "known malware distribution site" rather than "phishing" — URLhaus, for instance,
+is entirely `malware_download` and contains no phishing at all. URLs whose host is a bare IP
+are dropped by default: they are botnet payload servers a browser never navigates to.
+
+**The built artifact is deliberately not committed.** Phishing URLs die within days, so a list
+in git would imply protection it no longer provides; building it belongs in a scheduled job,
+not a commit. That also avoids redistributing feed-derived data whose terms vary.
 
 > Check each feed's terms yourself — redistribution rights vary.
 > **JC3 (Japan Cybercrime Control Center) has no public feed**; members can pass their file via `plain:`.
@@ -623,7 +633,8 @@ tests/               ユニット(Node) + E2E(Playwright/ヘッドレスChromium
 node tools/build-blocklist.mjs \
   --source=openphish:https://openphish.com/feed.txt \
   --source=plain:./data/private-feed.txt \
-  --out=extension/data/blocklist.json --ttl-days=14
+  --malware-source=urlhaus:https://urlhaus.abuse.ch/downloads/csv_online/ \
+  --out=extension/data/blocklist.json --ttl-days=7
 ```
 
 ### 外部リピュテーション照会（既定で無効）

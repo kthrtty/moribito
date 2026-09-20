@@ -115,26 +115,49 @@ export function base64ToBytes(base64) {
  */
 export function createBlocklist(artifact) {
   if (!artifact?.tables) return null;
-  const tables = {};
-  for (const kind of ['url', 'host', 'domain']) {
-    const base64 = artifact.tables[kind];
-    tables[kind] = base64 ? decodeTable(base64ToBytes(base64)) : { hi: new Uint32Array(0), lo: new Uint32Array(0), count: 0 };
-  }
+
+  const decode = (source) => {
+    const out = {};
+    for (const kind of ['url', 'host', 'domain']) {
+      const base64 = source?.[kind];
+      out[kind] = base64
+        ? decodeTable(base64ToBytes(base64))
+        : { hi: new Uint32Array(0), lo: new Uint32Array(0), count: 0 };
+    }
+    return out;
+  };
+
+  const tables = decode(artifact.tables);
+  // マルウェア配布URLは別表で持つ。警告文が「フィッシング」では実態と合わないため。
+  const malwareTables = artifact.malwareTables ? decode(artifact.malwareTables) : null;
 
   return {
     version: artifact.version ?? 0,
     generatedAt: artifact.generatedAt ?? null,
     expiresAt: artifact.expiresAt ?? null,
     sources: artifact.sources ?? [],
-    size: tables.url.count + tables.host.count + tables.domain.count,
+    size: tables.url.count + tables.host.count + tables.domain.count
+      + (malwareTables ? malwareTables.url.count + malwareTables.host.count + malwareTables.domain.count : 0),
+    counts: {
+      phishing: tables.url.count + tables.host.count + tables.domain.count,
+      malware: malwareTables
+        ? malwareTables.url.count + malwareTables.host.count + malwareTables.domain.count : 0,
+    },
 
-    /** @returns {Promise<{kind:string}|null>} */
+    /** @returns {Promise<{kind:string, threat:string}|null>} */
     async lookup(rawUrl, domainInfo) {
       for (const { kind, key } of urlKeys(rawUrl, domainInfo)) {
-        const table = tables[kind];
-        if (!table.count) continue;
+        const phishingTable = tables[kind];
+        const malwareTable = malwareTables?.[kind];
+        if (!phishingTable.count && !malwareTable?.count) continue;
+
         const { hi, lo } = await hashKey(key);
-        if (includes(table.hi, table.lo, hi, lo)) return { kind, matchedOn: kind };
+        if (phishingTable.count && includes(phishingTable.hi, phishingTable.lo, hi, lo)) {
+          return { kind, matchedOn: kind, threat: 'phishing' };
+        }
+        if (malwareTable?.count && includes(malwareTable.hi, malwareTable.lo, hi, lo)) {
+          return { kind, matchedOn: kind, threat: 'malware' };
+        }
       }
       return null;
     },

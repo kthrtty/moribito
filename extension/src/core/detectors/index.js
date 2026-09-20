@@ -57,7 +57,8 @@ export const knownGoodDetector = {
   defaultEnabled: true,
   // URL/ホスト単位で報告済みなら打ち切らない（乗っ取られた正規サイト対策）
   runWhen: (state) => !state.signals.some(
-    (s) => s.id === 'known-phishing' && (s.kind === 'url' || s.kind === 'host')),
+    (s) => (s.id === 'known-phishing' || s.id === 'known-malware')
+      && (s.kind === 'url' || s.kind === 'host')),
   run(ctx) {
     const f = ctx.features;
     if (!f?.ok) return null;

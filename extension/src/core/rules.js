@@ -27,18 +27,46 @@ const SENSITIVE_SET = new Set(SENSITIVE_WORDS);
 // public suffix に見せかけてサブドメインに置かれる語
 const FAKE_SUFFIX_TOKENS = new Set(['com', 'net', 'org', 'jp', 'co', 'ne', 'or', 'go', 'gov', 'edu']);
 
+// クラウドや社内システムのホスト名によく出る語。
+// これらが並ぶ長いサブドメインは、隠すためではなく命名規則によるもの。
+const INFRA_TOKENS = new Set([
+  'api', 'gateway', 'gw', 'lb', 'elb', 'alb', 'nlb', 'cdn', 'edge', 'origin',
+  'prod', 'production', 'stg', 'staging', 'dev', 'test', 'qa', 'sandbox',
+  'internal', 'intranet', 'corp', 'svc', 'service', 'cluster', 'node', 'pod',
+  'us', 'eu', 'ap', 'east', 'west', 'north', 'south', 'central', 'northeast',
+  'compute', 'storage', 'db', 'cache', 'queue', 'ci', 'build', 'registry',
+  'k8s', 'ingress', 'proxy', 'router', 'vpn', 'bastion', 'metrics', 'logs',
+]);
+
 /** 既知リスト一致の信号。同期経路とパイプラインの両方から使う。 */
 export function knownPhishingSignal(hit) {
   const weight = { url: 0.99, host: 0.97, domain: 0.95 }[hit.kind] ?? 0.95;
   const where = { url: 'このURL', host: 'このホスト', domain: 'このドメイン' }[hit.kind] ?? '一致';
+  const malware = hit.threat === 'malware';
   return {
-    id: 'known-phishing',
+    id: malware ? 'known-malware' : 'known-phishing',
     kind: hit.kind,
+    threat: hit.threat ?? 'phishing',
     weight,
-    title: '既知のフィッシングサイトとして報告されています',
-    detail: `${where} が、配布されているフィッシング報告リストと一致しました。`,
+    title: malware
+      ? '既知のマルウェア配布サイトとして報告されています'
+      : '既知のフィッシングサイトとして報告されています',
+    detail: malware
+      ? `${where} が、マルウェアを配布しているとして報告されています。ファイルを開かないでください。`
+      : `${where} が、配布されているフィッシング報告リストと一致しました。`,
     from: 'list',
   };
+}
+
+/**
+ * 末尾の年号を除いた数字の比率。
+ * project2024 や conference2019 は人が付ける名前なので、
+ * 末尾の4桁年号を数字として数えない。
+ */
+function digitRatioIgnoringYear(name) {
+  const withoutYear = String(name ?? '').replace(/(?:19|20)\d{2}$/, '');
+  const digits = (withoutYear.match(/\d/g) ?? []).length;
+  return digits / Math.max(1, withoutYear.length);
 }
 
 /** ブランド語の長さに応じた信頼度（短い語は誤検知しやすいので割り引く）。 */
@@ -51,9 +79,13 @@ function tokenStrength(token) {
 
 /** トークンがブランド語（+よくある修飾語）に一致するか。 */
 export function matchBrandToken(token, brand) {
+  // 数字置換（g00gle）や rn→m を畳み込んでから比較する。
+  // 生の文字列だけで比べると g00gle-support.com が素通りする。
+  const folded = collapse(token);
   for (const bt of brand.tokens) {
     if (!/^[a-z0-9]+$/.test(bt)) continue; // 日本語エイリアスは別経路で見る
     if (token === bt) return { brandToken: bt, kind: 'exact' };
+    if (folded && folded === collapse(bt)) return { brandToken: bt, kind: 'folded' };
     if (bt.length >= 4 && token.length > bt.length) {
       if (token.startsWith(bt) && FILLER_TOKENS.has(token.slice(bt.length))) {
         return { brandToken: bt, kind: 'prefixed' };
@@ -254,11 +286,17 @@ export function evaluateRules(f, opt = {}) {
     add('deep-subdomain-mild', 0.18, 'サブドメインが多め', `${f.sub}`);
   }
 
-  if (f.subLength >= 25 && f.subEntropy >= 3.4) {
+  // インフラの命名規則（api-gateway-prod.eu-central-1.elb…）を
+  // 「隠すための長さ」と取り違えないようにする
+  const infraTokenCount = f.subTokens.filter((t) => INFRA_TOKENS.has(t)).length;
+  if (f.subLength >= 25 && f.subEntropy >= 3.4 && infraTokenCount < 2) {
     add('random-subdomain', 0.45, '意味のないランダムなサブドメイン',
       'アドレスバーに収まらない長さにして、本当のドメインを隠す手口です。');
   }
-  if (f.name.length >= 10 && f.nameEntropy >= 3.4 && f.maxConsonantRun >= 5) {
+  // 子音の連続だけを条件にすると、数字混じりの自動生成名（a8f3k29dj4mfs…）を
+  // 取り逃す。エントロピーは長い複合語でも簡単に上がるので使わない。
+  if (f.name.length >= 10
+      && (f.maxConsonantRun >= 5 || digitRatioIgnoringYear(f.name) >= 0.25)) {
     add('random-domain-name', 0.4, '機械生成されたようなドメイン名', `${f.registrable}`);
   }
   if (f.hyphenCount >= 4) {

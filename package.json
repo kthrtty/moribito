@@ -12,7 +12,8 @@
     "icons": "node tools/make-icons.mjs",
     "psl": "node tools/build-psl.mjs",
     "confusables": "node tools/build-confusables.mjs",
-    "eval": "node tools/evaluate.mjs"
+    "eval": "node tools/evaluate.mjs",
+    "blocklist": "node tools/build-blocklist.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0"
