@@ -246,6 +246,61 @@ export const localTextModelDetector = {
   },
 };
 
+/**
+ * 端末内のモデルに「このページはどのサービスを名乗っているか」を聞く。
+ *
+ * 3つのデータセットで測った最大のボトルネックは
+ * 「狙われたブランドが辞書に無いと何も検出できない」ことだった。
+ * モデルは BBVA も Bank of Ireland も知っているので、ここだけ辞書の制約を外せる。
+ *
+ * 安全側の設計:
+ *   ページ内容は攻撃者が制御できるので、プロンプトインジェクションを前提にする。
+ *   **モデルの出力は疑いを上げる方向にしか使わない。**
+ *   「正規である」という回答は信号を出さないだけで、打ち切りには使わない。
+ *   これにより injection の最大の戦果は「信号が1つ減る」ことに留まり、
+ *   自分をホワイトリストに載せることはできない。
+ *
+ * 呼ぶのは利用者が入力しようとした瞬間だけ。ページを開くたびには呼ばない。
+ */
+export const localBrandCheckDetector = {
+  id: 'local-brand-check',
+  label: '端末内モデルによるブランド確認',
+  description: '入力欄に触れた瞬間だけ、ページが名乗っているサービスと実際のドメインが'
+    + '一致するかを端末内のモデルに確認します。外部への送信はありません。',
+  stage: 'model',
+  cost: { network: 'none', latency: 'high' },
+  defaultEnabled: false,
+  configurable: true,
+  // 利用者が実際に入力しようとした契機のときだけ動かす
+  runWhen: (state, ctx) => state.score >= 0.2,
+  async run(ctx) {
+    const identify = ctx.services?.identifyService;
+    const evidence = ctx.evidence;
+    if (typeof identify !== 'function' || !evidence?.ok) return null;
+    if (!USER_INTENT_TRIGGERS.has(evidence.trigger)) return null;
+
+    const result = await identify(evidence, ctx.features.host);
+    if (!result?.service || !result.asksForCredentials) return null;
+    // 「正規である」「分からない」は信号にしない（injection で疑いを消させないため）
+    if (result.hostIsOfficialForService !== false) return null;
+
+    const weight = Math.min(0.8, 0.4 + result.confidence * 0.4);
+    return {
+      signals: [{
+        id: 'local-brand-mismatch',
+        weight,
+        title: `端末内の判定では「${result.service}」を名乗る別ドメインです`,
+        detail: `このページは ${result.service} として認証情報を求めていますが、`
+          + `${ctx.features.registrable} は ${result.service} のドメインではないと判定されました。`,
+        from: 'model',
+      }],
+    };
+  },
+};
+
+/** 利用者が実際に入力・操作しようとした契機。 */
+const USER_INTENT_TRIGGERS = new Set(['focusin', 'interaction', 'submit']);
+
 /** 既定のカタログ。順序はパイプラインが stage で決めるので並びは自由。 */
 export const DETECTOR_CATALOG = [
   allowlistDetector,
@@ -257,4 +312,5 @@ export const DETECTOR_CATALOG = [
   pageEvidenceDetector,
   localModelDetector,
   localTextModelDetector,
+  localBrandCheckDetector,
 ];

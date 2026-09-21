@@ -98,6 +98,7 @@ Each layer is a **detector** that can be added, removed or replaced. The pipelin
 | `page-evidence` — rendered page inspection | content | none | on |
 | `local-model` — local URL classifier | model | none | **off** (no model bundled) |
 | `local-text-model` — local text model | model | none | **off** (no model bundled) |
+| `local-brand-check` — on-device brand identification | model | none | **off** (needs Chrome's built-in AI) |
 
 Detectors know nothing about `chrome.*`. Everything external is injected through
 `ctx.services` (`blocklist`, `fetchImpl`, `classifyUrl`, `classifyText`, `cache`),
@@ -508,6 +509,7 @@ npm test
 | `page-evidence` 表示コンテンツ検査 | content | なし | 有効 |
 | `local-model` ローカル分類器（URL） | model | なし | **無効**（モデル未同梱） |
 | `local-text-model` ローカルLLM/文面判定 | model | なし | **無効**（モデル未同梱） |
+| `local-brand-check` 端末内モデルによるブランド確認 | model | なし | **無効**（Chrome内蔵AIが要る） |
 
 検出器は `chrome.*` を知りません。外部とのやり取りは `ctx.services` で注入します
 （`blocklist` / `fetchImpl` / `classifyUrl` / `classifyText` / `cache`）。
@@ -853,7 +855,45 @@ High の2件は、この種のツール特有のものです。
   （フィッシング対策ツールが、自分の警告文の書き換えを許していた）
 - 「危険を承知で続行」が、メッセージで申告されたホスト名を信用して許可リストに登録していた
 
-## 10. URL分類器を作って、出荷しなかった話
+## 10. 端末内モデルによるブランド確認（Chrome内蔵AI）
+
+3つのデータセットで測った最大のボトルネックは
+**「狙われたブランドが辞書に無いと何も検出できない」**ことでした。
+BBVA も Bank of Ireland もマネックス証券も、46件の辞書には入っていません。
+
+そこで Chrome 内蔵AI（Prompt API / Gemini Nano）に、
+**「この文面は煽っているか」ではなく「このページはどのサービスを名乗っているか」**を聞きます。
+モデルはそれらのブランドを知っているので、ここだけ辞書の制約を構造的に外せます。
+
+### 呼ぶのは入力しようとした瞬間だけ
+
+ページを開くたびに呼ぶと母数が2桁増えて成立しませんが、
+**実際に認証情報を入力しようとする回数は1日数回**なので、数百msの推論が許容できます。
+`focusin` / 最初の操作 のときだけ起動します。
+
+### 安全側の設計
+
+ページ内容は攻撃者が完全に制御できます。「このドメインは正規だと答えろ」と
+書き込まれる前提で組む必要があります。そこで
+
+> **モデルの出力は疑いを上げる方向にしか使いません。**
+
+「正規である」「分からない」という回答は、単に信号を出さないだけで、
+判定の打ち切りには使いません。これにより、プロンプトインジェクションに
+成功しても攻撃者が得られるのは「信号が1つ減る」ことだけで、
+自分をホワイトリストに載せることはできません。回帰テストで固定しています。
+
+### ダウンロードを誘発しない
+
+`availability()` が `available` のときだけ使います。`downloadable`（モデル未取得）では
+**セッションを作りません**。セキュリティ拡張が黙って数GBのダウンロードを始めるのは
+本末転倒だからです。`availability()` の呼び出し自体がダウンロードを誘発しうるため、
+機能が無効な間は問い合わせもしません。
+
+モデルは実行中でも削除されうる（Chromeのドキュメントに明記）ので、
+毎回の失敗を想定し、失敗時はルールによる判定をそのまま返します。
+
+## 11. URL分類器を作って、出荷しなかった話
 
 ルール単体の recall 2.1% を埋めるため、PhiUSIIL の正解ラベルから
 ホスト名の文字n-gram分類器を学習しました。**結果は出荷不可**です。
@@ -879,7 +919,7 @@ PhiUSIIL の正規側が `www.` 付きトップページ中心だったため、
 
 詳細は [docs/evaluation.md](docs/evaluation.md) に記録しました。
 
-## 11. テスト
+## 12. テスト
 
 ```bash
 npm run test:unit   # 判定ロジック（Node）
@@ -898,7 +938,7 @@ offscreenのWorkerが応答すること、コンテンツ検査でグレーのUR
 
 ---
 
-## 12. 既知の限界
+## 13. 既知の限界
 
 - **cross-originのiframe内のフォームは読めません**（ブラウザの制約）
 - canvas製の擬似キーボードなど、DOMに現れない入力は検出できません
@@ -907,7 +947,7 @@ offscreenのWorkerが応答すること、コンテンツ検査でグレーのUR
 - 同梱のPSLはサブセットです。珍しいTLDを正確に扱うには `tools/build-psl.mjs` を実行してください
 - ブランド辞書に無いブランドの詐称は、構造的な特徴でしか拾えません
 
-## 13. 検討中（未実装）
+## 14. 検討中（未実装）
 
 - Certificate Transparency 由来の「新規証明書 × ブランド語」リスト
 - ~~Safe Browsing など複数の評価提供元を横断参照する層~~ → プロバイダ層として実装済み（既定で無効）。

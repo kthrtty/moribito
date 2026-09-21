@@ -3,6 +3,8 @@
  * service worker がアイドル終了してもこのドキュメントは残るので、
  * モデルのロードコストを繰り返し払わずに済む。
  */
+import { availability, identifyService, destroySession } from './local-llm.js';
+
 const worker = new Worker(chrome.runtime.getURL('src/worker/detector.worker.js'), {
   type: 'module',
   name: 'moribito-detector',
@@ -41,6 +43,25 @@ function callWorker(payload, timeoutMs = 3000) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.target !== 'offscreen') return false;
-  callWorker(message.payload).then(sendResponse);
+  const payload = message.payload ?? {};
+
+  // Chrome内蔵AI（Prompt API）はDOMコンテキストにしか無いので、
+  // ワーカーへは渡さずこの文書で扱う。
+  if (payload.type === 'local-llm-status') {
+    availability().then((state) => sendResponse({ state })).catch(() => sendResponse({ state: 'unavailable' }));
+    return true;
+  }
+  if (payload.type === 'local-llm-identify') {
+    identifyService(payload.evidence, payload.host)
+      .then((result) => sendResponse({ result }))
+      .catch(() => sendResponse({ result: null }));
+    return true;
+  }
+  if (payload.type === 'local-llm-reset') {
+    destroySession().then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  callWorker(payload).then(sendResponse);
   return true; // 非同期応答
 });

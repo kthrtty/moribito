@@ -159,6 +159,21 @@
       </section>
 
       <section>
+        <h2>端末内モデル（Chrome内蔵AI）</h2>
+        <p class="note">
+          入力欄に触れた瞬間だけ、ページが名乗っているサービスと実際のドメインが一致するかを
+          端末内のモデルに確認します。<strong>外部への送信はありません。</strong>
+          有効化は上の「判定レイヤ」の「端末内モデルによるブランド確認」から行います。
+        </p>
+        <p class="note" id="local-llm-status">状態: 未確認</p>
+        <p class="note">
+          Chrome 148以降のデスクトップ版が必要で、空きディスク22GB・VRAM4GB超
+          （またはRAM16GB・4コア）という条件があります。
+          モデルが端末に無い場合、この拡張からダウンロードを開始することはありません。
+        </p>
+      </section>
+
+      <section>
         <h2>ローカル分類器</h2>
         <div class="field">
           <label for="use-model">グレーゾーンで使う</label>

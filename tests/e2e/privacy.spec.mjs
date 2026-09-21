@@ -148,3 +148,32 @@ test('Jevを有効にしていなければ外部へ出ない', async ({ context,
     .filter((url) => !url.startsWith('https://aeon-card.info/'));
   expect(external, `外部への通信が発生しました:\n${external.join('\n')}`).toEqual([]);
 });
+
+test('端末内モデルは既定で無効で、無効なら利用可否も問い合わせない', async ({ context, extensionId, serviceWorker }) => {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/src/ui/options.html`);
+  await expect(page.locator('#block-out')).not.toHaveText('');
+
+  await expect(page.locator('#detector-local-brand-check')).not.toBeChecked();
+  // availability() の呼び出し自体がモデルのダウンロードを誘発しうるので、
+  // 無効な間は問い合わせない
+  await expect(page.locator('#local-llm-status')).toContainText('無効');
+});
+
+test('端末内モデルを有効にしても、使えない環境では判定が壊れない', async ({ context, extensionId, serviceWorker }) => {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/src/ui/options.html`);
+  await expect(page.locator('#block-out')).not.toHaveText('');
+  await page.locator('#detector-local-brand-check').check();
+
+  // ヘッドレス環境にモデルは無い。状態が正しく報告されること。
+  await page.reload();
+  await expect(page.locator('#local-llm-status'))
+    .toContainText(/利用できません|要件を満たしていません|未取得|不明/, { timeout: 15_000 });
+
+  // モデルが無くても、ルールによる判定はそのまま動く
+  const verdict = await serviceWorker.evaluate(
+    () => globalThis.moribito.evaluate('http://amazon.co.jp.verify.x7fk2p.top/signin')
+      .then((r) => r.verdict));
+  expect(verdict).toBe('block');
+});

@@ -281,6 +281,12 @@ async function buildContext(url, s, extra = {}) {
         const out = await askWorker({ type: 'classify-text', text });
         return out?.probability != null ? out : null;
       },
+      // Chrome内蔵AI（Prompt API）。offscreen document 側で扱う。
+      // 利用者が入力欄に触れた瞬間だけ呼ばれるので、数百msの推論を許容できる。
+      identifyService: async (evidence, host) => {
+        const out = await askWorker({ type: 'local-llm-identify', evidence, host }, 10_000);
+        return out?.result ?? null;
+      },
     },
     ...extra,
   };
@@ -643,6 +649,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await saveSettings(DEFAULT_SETTINGS);
         verdictCache.clear();
         sendResponse({ ok: true, settings: await settings() });
+        break;
+      }
+      case 'local-llm-status': {
+        // availability() の呼び出し自体がダウンロードを誘発しうるため、
+        // 機能が有効なときだけ問い合わせる。
+        const s = await settings();
+        const enabled = detectorConfigOf(s)['local-brand-check']?.enabled;
+        if (!enabled) {
+          sendResponse({ ok: true, state: 'disabled' });
+          break;
+        }
+        const out = await askWorker({ type: 'local-llm-status' }, 8000);
+        sendResponse({ ok: true, state: out?.state ?? 'unavailable' });
         break;
       }
       case 'model-state': {

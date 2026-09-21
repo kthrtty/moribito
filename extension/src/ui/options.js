@@ -227,6 +227,17 @@ async function main() {
     renderBlocklistStatus(res.status);
   });
 
+  const llm = await chrome.runtime.sendMessage({ type: 'local-llm-status' });
+  const llmLabels = {
+    disabled: '無効（有効にすると利用可否を確認します）',
+    unsupported: 'このChromeでは利用できません（拡張では148以降が必要）',
+    unavailable: '端末の要件を満たしていません',
+    downloadable: 'モデル未取得。この拡張からはダウンロードを開始しません',
+    downloading: 'Chromeがモデルを取得中です',
+    available: '利用できます',
+  };
+  $('local-llm-status').textContent = `状態: ${llmLabels[llm?.state] ?? '不明'}`;
+
   const state = await chrome.runtime.sendMessage({ type: 'model-state' });
   const labels = { ready: '読み込み済み', unavailable: 'モデル未配置（ルールのみ）', idle: '未ロード', loading: '読み込み中' };
   $('model-state').textContent = `状態: ${labels[state?.state] ?? '不明'}`;
