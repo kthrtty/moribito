@@ -196,6 +196,20 @@ Anyone can publish there, and form builders are a standard phishing vector. Bein
 here does not make a page suspicious — it only removes the automatic trust, so the URL rules
 and the content inspection run as they would anywhere else.
 
+### Intervening where it is actually read
+
+A banner at the top of the page gets skipped. Two interventions fire at the moments that matter,
+and only on pages already flagged as suspicious:
+
+| Moment | What happens |
+|---|---|
+| The user focuses — or starts typing into — a password, card-number or OTP field | An inline note appears **next to that field**, in a shadow root, following it on scroll |
+| The form is submitted | A single confirmation. **Not a block** — "don't send" is the default, "send anyway" is there |
+
+Re-submission uses `form.requestSubmit()` so the page's own handlers still run.
+The typing trigger matters because forms posted by JavaScript never fire a `submit` event —
+in that case the inline note while typing is the last checkpoint.
+
 ### Keeping false positives down
 
 - Official brand domains (46 brands) and popular domains are never judged
@@ -392,6 +406,7 @@ node tools/evaluate.mjs data/your-set.csv --sweep
 ## Known limits
 
 - Forms inside cross-origin iframes cannot be read (a browser restriction)
+- A form posted with `fetch`/`XMLHttpRequest` never fires `submit`, so only the typing-time note applies
 - Input that never reaches the DOM (canvas-drawn keypads) is invisible to it
 - Short URLs are not expanded (that would require an external request)
 - Certificate contents are not inspected (no extension API for it)
@@ -803,6 +818,21 @@ Certificate Transparency ログから「ブランド語を含む新規証明書�
 ここに載っていること自体は「危険」を意味しません。**自動的な信頼をやめるだけ**で、
 判定は他のページと同じようにURLルールと表示内容の検査が行われます。
 
+### 読まれる場所で介入する
+
+画面上部のバーは読み飛ばされます。危険と判定したページに限り、
+**効く瞬間**が2つあります。
+
+| 瞬間 | 介入 |
+|---|---|
+| パスワード・カード番号・認証コードの欄に**フォーカスした／打ち始めた** | **その欄のすぐ隣**に注記を出す。Shadow DOM に隔離し、スクロールに追従する |
+| フォームを**送信しようとした** | 一度だけ確認を挟む。**ブロックはしない**（既定は「送信しない」、「それでも送信する」も用意） |
+
+再送信には `form.requestSubmit()` を使うので、ページ側の送信処理も動きます。
+
+「打ち始めたとき」の契機が要るのは、**JavaScriptで送信する実装では `submit` イベントが飛ばない**ためです。
+その場合は入力中の注記が最後の砦になります。
+
 ### 誤検知を抑える仕組み
 
 - 公式ブランドドメイン（46ブランド）と著名ドメインは判定せず通過
@@ -941,6 +971,7 @@ offscreenのWorkerが応答すること、コンテンツ検査でグレーのUR
 ## 13. 既知の限界
 
 - **cross-originのiframe内のフォームは読めません**（ブラウザの制約）
+- `fetch`/`XMLHttpRequest` で送信する実装では `submit` イベントが飛ばないため、送信直前の確認は挟めません（入力時の注記のみ）
 - canvas製の擬似キーボードなど、DOMに現れない入力は検出できません
 - 短縮URLは展開しません（展開には外部通信が必要になるため）
 - 証明書の内容は見ていません（Chrome拡張APIから取得できない）

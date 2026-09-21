@@ -44,6 +44,21 @@ const SCAM_OVERLAY = `
   <script>window.onbeforeunload = () => 'stay';<\/script>`;
 
 const ROUTES = [
+  // URLだけで「注意」になるページ（ブロックには届かない）。入力欄への介入の検証用。
+  { match: /x7f3k9qz2m-portal\.cyou/, html: () => page('ログイン',
+      `<h1>ログイン</h1>
+       <form id="login" method="post" action="/auth">
+         <label>ID <input id="uid" type="text" name="uid" autocomplete="username" style="width:200px;height:24px"></label>
+         <label>パスワード <input id="pw" type="password" name="pw" autocomplete="current-password" style="width:200px;height:24px"></label>
+         <button id="go" type="submit">ログイン</button>
+       </form>`) },
+  // 判定対象だが安全なページ。介入しないことの検証用。
+  { match: /shop-example-store\.com\/signin/, html: () => page('Example Store — ログイン',
+      `<h1>ログイン</h1>
+       <form id="login" method="post" action="/auth">
+         <label>パスワード <input id="pw" type="password" name="pw" autocomplete="current-password" style="width:200px;height:24px"></label>
+         <button id="go" type="submit">ログイン</button>
+       </form>`) },
   // 公式ドメイン上の、第三者が作れる領域に置かれたフィッシング
   { match: /docs\.google\.com\/forms\//, html: () => page('Amazon アカウント確認', LOGIN_FORM) },
   { match: /docs\.google\.com\/document\//, html: () => page('議事録 - Google ドキュメント', '<h1 id="stub-page">議事録</h1>') },

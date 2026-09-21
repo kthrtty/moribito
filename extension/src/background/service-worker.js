@@ -411,11 +411,32 @@ async function probePage(tabId, url, result) {
       target: { tabId, frameIds: [0] },
       files: [PROBE_PATH],
     });
+    // URLだけで「注意」と出ている時点で、入力欄への介入を有効にしておく。
+    // 表示内容を見る前に利用者が入力を始めることがあるため。
+    if (result.verdict === 'warn') await sendRisk(tabId, 'warn', result.signals);
+
     if (mode === 'full' && injection?.result?.forms) {
       await applyPageEvidence(tabId, url, injection.result);
     }
   } catch {
     // chrome:// や権限のないページ、遷移済みなど。URL判定の結果をそのまま使う。
+  }
+}
+
+/**
+ * ページ側へ危険度を伝える。
+ * これを受け取ったページは、認証情報の入力欄に触れた時点で注記を出し、
+ * 送信の直前に一度だけ確認を挟む。
+ */
+async function sendRisk(tabId, level, signals) {
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'set-risk',
+      level,
+      reasons: (signals ?? []).slice(0, 3).map((signal) => signal.title),
+    });
+  } catch {
+    // プローブが入っていないタブ
   }
 }
 
@@ -447,6 +468,7 @@ async function applyPageEvidence(tabId, url, evidence) {
     const signals = evaluatePageEvidence(extractFeatures(url), evidence, { mode: 'structure-only' });
     if (!signals.length) return;
     await bumpStat('warned');
+    await sendRisk(tabId, 'warn', signals);
     await showOverlay(tabId, signals);
     return;
   }
@@ -469,6 +491,7 @@ async function applyPageEvidence(tabId, url, evidence) {
     await blockNavigation(tabId, url, combined);
   } else if (combined.verdict === 'warn') {
     await bumpStat('warned');
+    await sendRisk(tabId, 'warn', combined.signals);
     await showOverlay(tabId, pageSignals);
   }
 }

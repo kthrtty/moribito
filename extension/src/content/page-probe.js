@@ -55,6 +55,24 @@
     };
   }
 
+  // 介入の要否はページ側で即断する必要があるので、ここに最小限の語彙を置く。
+  // 採点そのものは core/page-evidence.js の担当。
+  const CREDENTIAL_AUTOCOMPLETE = new Set([
+    'current-password', 'new-password', 'cc-number', 'cc-csc', 'cc-exp',
+    'cc-exp-month', 'cc-exp-year', 'one-time-code',
+  ]);
+  const CREDENTIAL_WORDS = /パスワード|暗証|カード番号|セキュリティコード|認証コード|ワンタイム|口座番号|マイナンバー|個人番号|リカバリーフレーズ|シードフレーズ|password|passwd|cardnumber|securitycode|cvv|cvc|otp/i;
+
+  /** 認証情報を入れる欄か。 */
+  function isCredentialField(el) {
+    if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return false;
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    if (type === 'password') return true;
+    const auto = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).pop();
+    if (CREDENTIAL_AUTOCOMPLETE.has(auto)) return true;
+    return CREDENTIAL_WORDS.test(hintOf(el));
+  }
+
   const SEARCH_NAMES = new Set(['q', 's', 'query', 'search', 'keyword', 'kw', 'word', 'k']);
 
   /** 検索ボックスらしさ（これだけなら「要求」とみなさない）。 */
@@ -239,15 +257,146 @@
     }
   }
 
+  /** ページ側のCSSから隔離した入れ物を作る。 */
+  function makeHost(id) {
+    document.getElementById(id)?.remove();
+    const host = document.createElement('div');
+    host.id = id;
+    return host;
+  }
+
+  const WARN_STYLE = 'font:13px/1.5 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif';
+
+  /**
+   * ① 入力欄への介入。
+   * 画面上部のバーは読み飛ばされる。実際に入力しようとしている欄のすぐ隣に出す。
+   */
+  function showFieldWarning(field) {
+    const state = window[STATE_KEY];
+    if (!state.risk || state.fieldWarned === field) return;
+    state.fieldWarned = field;
+
+    const host = makeHost('moribito-field-warning');
+    host.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none';
+    const root = host.attachShadow({ mode: 'closed' });
+
+    const box = document.createElement('div');
+    box.setAttribute('role', 'alert');
+    box.style.cssText = `${WARN_STYLE};background:#7f1d1d;color:#fff;padding:8px 12px;`
+      + 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.35);max-width:320px;pointer-events:auto';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:700';
+    title.textContent = '⚠ ここに入力する前に確認してください';
+    const detail = document.createElement('div');
+    detail.style.cssText = 'font-size:12px;opacity:.92;margin-top:2px';
+    detail.textContent = (state.risk.reasons ?? []).slice(0, 2).join(' / ')
+      || 'このサイトは正規のものではない可能性があります。';
+    box.append(title, detail);
+    root.append(box);
+    (document.body || document.documentElement).append(host);
+
+    const place = () => {
+      if (!host.isConnected || !field.isConnected) return;
+      const rect = field.getBoundingClientRect();
+      const above = rect.top > 90;
+      host.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - 336))}px`;
+      host.style.top = above ? `${rect.top - 8}px` : `${rect.bottom + 8}px`;
+      host.style.transform = above ? 'translateY(-100%)' : 'none';
+    };
+    place();
+    state.placeFieldWarning = place;
+    addEventListener('scroll', place, { passive: true, capture: true });
+    addEventListener('resize', place, { passive: true });
+  }
+
+  /**
+   * ② 送信の受け止め。
+   * ブロックはせず、取り返しがつかなくなる直前に一度だけ確認を挟む。
+   */
+  function confirmSubmit(form) {
+    return new Promise((resolve) => {
+      const host = makeHost('moribito-submit-confirm');
+      host.style.cssText = 'position:fixed;inset:0;z-index:2147483647';
+      const root = host.attachShadow({ mode: 'closed' });
+
+      const backdrop = document.createElement('div');
+      backdrop.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.6);'
+        + 'display:flex;align-items:center;justify-content:center;padding:20px';
+      const card = document.createElement('div');
+      card.setAttribute('role', 'alertdialog');
+      card.style.cssText = `${WARN_STYLE};background:#fff;color:#1b1b1f;border-radius:12px;`
+        + 'padding:20px;max-width:420px;box-shadow:0 12px 40px rgba(0,0,0,.4)';
+
+      const heading = document.createElement('div');
+      heading.style.cssText = 'font-size:16px;font-weight:700;margin-bottom:8px';
+      heading.textContent = 'このまま送信しますか？';
+      const body = document.createElement('div');
+      body.style.cssText = 'font-size:13px;color:#444';
+      const state = window[STATE_KEY];
+      body.textContent = `${(state.risk?.reasons ?? []).slice(0, 3).join(' / ')
+        || 'このサイトは正規のものではない可能性があります。'}`;
+      const note = document.createElement('div');
+      note.style.cssText = 'font-size:12px;color:#7f1d1d;margin-top:8px';
+      note.textContent = '送信すると取り消せません。心当たりが無い場合は送信しないでください。';
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:8px;margin-top:16px;justify-content:flex-end';
+      const stop = document.createElement('button');
+      stop.textContent = '送信しない';
+      stop.style.cssText = 'font:inherit;background:#1a56db;color:#fff;border:0;border-radius:8px;padding:8px 16px;cursor:pointer;font-weight:700';
+      const proceed = document.createElement('button');
+      proceed.textContent = 'それでも送信する';
+      proceed.style.cssText = 'font:inherit;background:transparent;color:#7f1d1d;border:1px solid #7f1d1d;border-radius:8px;padding:8px 16px;cursor:pointer';
+
+      const close = (ok) => { host.remove(); resolve(ok); };
+      stop.addEventListener('click', () => close(false));
+      proceed.addEventListener('click', () => close(true));
+
+      actions.append(stop, proceed);
+      card.append(heading, body, note, actions);
+      backdrop.append(card);
+      root.append(backdrop);
+      (document.body || document.documentElement).append(host);
+      stop.focus();
+    });
+  }
+
   if (!window[STATE_KEY]) {
-    window[STATE_KEY] = { reports: 0 };
+    window[STATE_KEY] = { reports: 0, risk: null, fieldWarned: null, allowSubmit: null };
 
     // 入力しようとした瞬間。後から差し込まれるフォームを取りこぼさない。
     document.addEventListener('focusin', (event) => {
       const el = event.target;
       if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
       report('focusin');
+      if (isCredentialField(el)) showFieldWarning(el);
     }, { capture: true, passive: true });
+
+    // 実際に打ち始めたときにも出す。
+    // JSで送信する実装では submit イベントが飛ばないので、ここが最後の砦になる。
+    document.addEventListener('input', (event) => {
+      if (isCredentialField(event.target)) showFieldWarning(event.target);
+    }, { capture: true, passive: true });
+
+    // 送信を一度だけ受け止める。ブロックはしない。
+    document.addEventListener('submit', (event) => {
+      const state = window[STATE_KEY];
+      const form = event.target;
+      if (!state.risk || !form || state.allowSubmit === form) return;
+      const fields = [...form.querySelectorAll('input, textarea')];
+      if (!fields.some(isCredentialField)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      confirmSubmit(form).then((ok) => {
+        if (!ok) return;
+        state.allowSubmit = form;
+        // requestSubmit ならページ側の submit ハンドラも動く。
+        // form.submit() はそれらを飛ばしてしまうので、使えるときは避ける。
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.submit();
+      });
+    }, { capture: true });
 
     // ここから下は「入力欄を持たない詐欺」向けの契機。
     // サポート詐欺は全画面化・音声再生・クリック誘導のいずれかを必ず伴うので、
@@ -268,6 +417,10 @@
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.type === 'show-overlay') {
         showOverlay(message);
+        sendResponse({ ok: true });
+      }
+      if (message?.type === 'set-risk') {
+        window[STATE_KEY].risk = message.level ? { level: message.level, reasons: message.reasons ?? [] } : null;
         sendResponse({ ok: true });
       }
       if (message?.type === 'collect-evidence') {
